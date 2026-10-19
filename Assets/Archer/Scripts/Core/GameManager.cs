@@ -382,7 +382,7 @@ namespace Archer
         // Bright, saturated values so enemies read against the cool forest.
         static Color RoleColor(MonsterRole role) => role switch
         {
-            MonsterRole.Runner => new Color(0.62f, 0.80f, 0.42f),   // lighter goblin
+            MonsterRole.Runner => new Color(0.72f, 0.86f, 0.40f),   // bright, light goblin
             MonsterRole.Shield => new Color(0.54f, 0.52f, 0.32f),   // dull, armored
             MonsterRole.Ogre => new Color(0.54f, 0.42f, 0.46f),     // ogre
             _ => new Color(0.46f, 0.64f, 0.36f)                     // goblin raider (green)

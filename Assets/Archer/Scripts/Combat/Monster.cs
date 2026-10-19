@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Archer
@@ -55,6 +56,8 @@ namespace Archer
         Vector3 _deathPosition;
         Quaternion _deathRotation;
         LineRenderer _attackRing;
+        Transform _runnerTail;
+        readonly List<Material> _runnerAccentMaterials = new();
         public bool IsDead { get; private set; }
         public bool IsWinding => _winding;
         public float WindupProgress => _winding ? 1f-Mathf.Clamp01(_windUpTimer / WindUp) : 0f;
@@ -96,6 +99,11 @@ namespace Archer
                 _ => 1.6f
             };
             root.AddComponent<RuntimeMaterials>().Capture(root.transform, monster._meshModelRoot);
+            // Accents attached to imported bones are inside the excluded visual,
+            // so hand their generated materials to the same owner.
+            var owned = root.GetComponent<RuntimeMaterials>();
+            if (monster._runnerAccentMaterials.Count > 0)
+                owned.CaptureOwned(monster._runnerAccentMaterials.ToArray());
             return monster;
         }
 
@@ -194,21 +202,47 @@ namespace Archer
 
             if (role == MonsterRole.Runner)
             {
-                // Red scarf — the runner's warm accent against the cool forest.
-                // Keep it wrapped at the neck and slightly askew: a straight red
-                // bar at head height reads as a second health bar.
-                var scarfMat = Prim.Material(new Color(0.74f, 0.19f, 0.17f), 0.2f);
-                var collar = Prim.Create(PrimitiveType.Cube, "Scarf", transform,
-                    new Vector3(0f, 1.2f * s, 0.12f * s),
-                    new Vector3(0.58f * s, 0.12f * s, 0.44f * s), scarfMat, false);
-                collar.transform.localRotation = Quaternion.Euler(0f, 0f, 7f);
-                Prim.Create(PrimitiveType.Cube, "Scarf knot", transform,
-                    new Vector3(-0.24f * s, 1.11f * s, 0.18f * s),
-                    new Vector3(0.13f * s, 0.15f * s, 0.13f * s), scarfMat, false);
-                var tail = Prim.Create(PrimitiveType.Cube, "Scarf tail", transform,
-                    new Vector3(0.22f * s, 0.93f * s, -0.13f * s),
-                    new Vector3(0.15f * s, 0.34f * s, 0.1f * s), scarfMat, false);
-                tail.transform.localRotation = Quaternion.Euler(-12f, 0f, 9f);
+                // The imported goblin is one skinned mesh, so a scout's identity
+                // has to be added geometry. Attach it to the animated bones so it
+                // moves with the body instead of floating as a red block, and keep
+                // every piece thin and small: a flat plate at torso height reads as
+                // a slab, not clothing.
+                var scarfMat = Prim.Material(new Color(0.78f, 0.20f, 0.16f), 0.25f);
+                var boneRoot = _meshModelRoot != null ? _meshModelRoot : transform;
+                _runnerAccentMaterials.Add(scarfMat);
+
+                // Hood: the strongest read at gameplay distance. A red head vs a
+                // bare green one is unmistakable, and it also marks the head as the
+                // place to aim without adding a hitbox.
+                var head = FindBone(boneRoot, "Head");
+                if (head != null)
+                {
+                    var hood = Prim.Create(PrimitiveType.Sphere, "Runner hood", head,
+                        new Vector3(0f, 0.085f, -0.005f),
+                        new Vector3(0.24f, 0.20f, 0.24f), scarfMat, false);
+                    var peak = Prim.Create(PrimitiveType.Cube, "Runner hood peak", hood.transform,
+                        new Vector3(0f, 0.62f, -0.25f),
+                        new Vector3(0.28f, 0.35f, 0.5f), scarfMat, false);
+                    peak.transform.localRotation = Quaternion.Euler(28f, 0f, 0f);
+                }
+
+                // Sash: a thin diagonal band across the chest. Cloth, not armour —
+                // narrow enough to read as a stripe at gameplay distance.
+                var spine = FindBone(boneRoot, "Spine02");
+                if (spine != null)
+                {
+                    var sash = Prim.Create(PrimitiveType.Cube, "Runner sash", spine,
+                        new Vector3(0f, 0.04f, 0.075f),
+                        new Vector3(0.26f, 0.045f, 0.03f), scarfMat, false);
+                    sash.transform.localRotation = Quaternion.Euler(0f, 0f, 38f);
+                }
+
+                // Scarf tail streaming behind: a directional tell while running.
+                var tail = Prim.Create(PrimitiveType.Cube, "Runner scarf tail", transform,
+                    new Vector3(0.09f * s, 1.00f * s, -0.20f * s),
+                    new Vector3(0.055f * s, 0.24f * s, 0.03f * s), scarfMat, false);
+                tail.transform.localRotation = Quaternion.Euler(30f, 0f, 16f);
+                _runnerTail = tail.transform;
             }
 
             if (role == MonsterRole.Shield)
@@ -290,6 +324,9 @@ namespace Archer
             foreach (var r in source)
             {
                 if (r == null || !r.enabled) continue;
+                // Costume pieces (hood, sash, scarf) are not part of the body
+                // silhouette; including them would push the head band upward.
+                if (r.name.StartsWith("Runner ")) continue;
                 if (!hasBounds) { bounds = r.bounds; hasBounds = true; }
                 else bounds.Encapsulate(r.bounds);
             }
@@ -304,6 +341,15 @@ namespace Archer
             float scaleY = Mathf.Max(0.0001f, Mathf.Abs(space.lossyScale.y));
             _headBottomLocal = (headBottomWorld - space.position.y) / scaleY;
             _headTopLocal = (headTopWorld - space.position.y) / scaleY;
+        }
+
+        /// <summary>Find a named bone in the imported rig, if the prefab has one.</summary>
+        static Transform FindBone(Transform root, string name)
+        {
+            if (root == null) return null;
+            foreach (var t in root.GetComponentsInChildren<Transform>())
+                if (t.name == name) return t;
+            return null;
         }
 
         /// <summary>True when a hit point lands on the head band of this monster.</summary>
@@ -406,8 +452,7 @@ namespace Archer
             _attackRing.enabled = _winding;
             if(_winding) _attackRing.widthMultiplier = Mathf.Lerp(0.04f,0.12f,WindupProgress);
             _walkPhase += Time.deltaTime * moveSpeed * 5f;
-            float stride = distance > _attackRange ? Mathf.Sin(_walkPhase) * 24f : 0f;
-            _leftLeg.localRotation = Quaternion.Euler(stride,0,0);
+            float stride = distance > _attackRange ? Mathf.Sin(_walkPhase) * 24f : 0f;            _leftLeg.localRotation = Quaternion.Euler(stride,0,0);
             _rightLeg.localRotation = Quaternion.Euler(-stride,0,0);
             _weapon.localRotation = Quaternion.Euler(_winding ? -70f * (1f-_windUpTimer/Mathf.Max(WindUp,0.01f)) : stride*0.4f,0,-12f);
 
@@ -434,6 +479,13 @@ namespace Archer
 
                 _meshModelRoot.localPosition = new Vector3(0f, 0.95f * s + bob, lungeZ);
                 _meshModelRoot.localRotation = Quaternion.Euler(lungeRotX, 0f, tilt);
+            }
+
+            if (_runnerTail != null)
+            {
+                // The scarf streams back while the scout is moving.
+                float flutter = distance > _attackRange ? Mathf.Sin(_walkPhase * 1.7f) * 10f : 0f;
+                _runnerTail.localRotation = Quaternion.Euler(30f + flutter, 0f, 16f);
             }
 
             UpdateTint();

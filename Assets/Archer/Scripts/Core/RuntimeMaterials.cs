@@ -14,6 +14,14 @@ namespace Archer
                 foreach(var material in renderer.sharedMaterials)
                     if(material != null) _owned.Add(material);
         }
+
+        /// <summary>Register materials created outside the captured scope (e.g. accents on imported bones).</summary>
+        public void CaptureOwned(params Material[] materials)
+        {
+            foreach (var material in materials)
+                if (material != null) _owned.Add(material);
+        }
+
         void OnDestroy()
         {
             foreach(var material in _owned) if(material != null) Destroy(material);
