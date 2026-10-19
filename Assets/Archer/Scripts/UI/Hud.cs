@@ -43,7 +43,9 @@ namespace Archer
             var scale = gameObject.AddComponent<CanvasScaler>();
             scale.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scale.referenceResolution = new Vector2(480, 854);
-            scale.matchWidthOrHeight = 0f; // Keep text proportional to phone width on tall screens.
+            // Expand fits the whole reference canvas on any aspect. Matching only
+            // width cropped the bottom row on tall phones (e.g. 1200x2000).
+            scale.screenMatchMode = CanvasScaler.ScreenMatchMode.Expand;
             gameObject.AddComponent<GraphicRaycaster>();
             if (Object.FindFirstObjectByType<EventSystem>() == null)
             {
@@ -186,11 +188,11 @@ namespace Archer
             _offerB = Button("Upgrade B", _panel, "", new Vector2(0, 0.33f), new Vector2(1, 0.33f), Vector2.zero, new Vector2(-36, 96), () => Choose(1));
             _action = Button("Primary action", _panel, "Begin Raid 1", new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 55), new Vector2(-36, 68), Act, true);
             _practice = Button("Practice", _panel, "Practice", new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 140), new Vector2(-36, 56), () => GameManager.Instance?.StartTutorial());
-            _sound = Button("Sound toggle", _overlay.transform, "", new Vector2(0.08f, 0.12f), new Vector2(0.48f, 0.12f), Vector2.zero, new Vector2(0, 64), () => { PlayerPrefs.SetInt("LastRanger.Sound", 1-PlayerPrefs.GetInt("LastRanger.Sound", 1)); PlayerPrefs.Save(); });
-            _guide = Button("Guide toggle", _overlay.transform, "", new Vector2(0.52f, 0.12f), new Vector2(0.92f, 0.12f), Vector2.zero, new Vector2(0, 64), () => { var a = ArcherController.Instance; if (a != null) { a.ShowAimGuide = !a.ShowAimGuide; PlayerPrefs.SetInt("LastRanger.Guide", a.ShowAimGuide ? 1 : 0); PlayerPrefs.Save(); } });
+            _sound = Button("Sound toggle", _overlay.transform, "", new Vector2(0.08f, 0.125f), new Vector2(0.48f, 0.125f), Vector2.zero, new Vector2(0, 54), () => { PlayerPrefs.SetInt("LastRanger.Sound", 1-PlayerPrefs.GetInt("LastRanger.Sound", 1)); PlayerPrefs.Save(); });
+            _guide = Button("Guide toggle", _overlay.transform, "", new Vector2(0.52f, 0.125f), new Vector2(0.92f, 0.125f), Vector2.zero, new Vector2(0, 54), () => { var a = ArcherController.Instance; if (a != null) { a.ShowAimGuide = !a.ShowAimGuide; PlayerPrefs.SetInt("LastRanger.Guide", a.ShowAimGuide ? 1 : 0); PlayerPrefs.Save(); } });
             _soundLabel = _sound.GetComponentInChildren<Text>();
             _guideLabel = _guide.GetComponentInChildren<Text>();
-            var language = Button("Language toggle", _overlay.transform, "", new Vector2(.15f,.035f), new Vector2(.85f,.035f), Vector2.zero, new Vector2(0,56), () => GameLanguage.Toggle());
+            var language = Button("Language toggle", _overlay.transform, "", new Vector2(.15f,.055f), new Vector2(.85f,.055f), Vector2.zero, new Vector2(0,46), () => GameLanguage.Toggle());
             _languageLabel = language.GetComponentInChildren<Text>();
         }
 
