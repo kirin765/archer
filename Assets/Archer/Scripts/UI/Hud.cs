@@ -13,9 +13,9 @@ namespace Archer
         static readonly Color Cream = new(0.94f, 0.93f, 0.85f);
         static readonly Color Muted = new(0.61f, 0.72f, 0.72f);
         public static Hud Instance { get; private set; }
-        RectTransform _safe, _panel, _pauseRect, _cancelRect;
+        RectTransform _safe, _panel, _pauseRect, _cancelRect, _skipRect;
         Text _hp, _raid, _enemies, _ammo, _drawLabel, _title, _subtitle, _stats, _toast, _toastDetail, _hint, _brand;
-        Text _soundLabel, _guideLabel, _score, _bossLabel, _languageLabel;
+        Text _soundLabel, _guideLabel, _score, _bossLabel, _languageLabel, _objective, _objectiveSub;
         bool _lastKorean;
         Image _bossFill;
         GameObject _bossPanel;
@@ -27,7 +27,7 @@ namespace Archer
         Image _healthFill, _chargeFill, _regenFill, _reticle, _hit, _hurt;
         Image[] _quiver;
         GameObject _overlay, _combat, _charge, _regen, _pause, _cancel;
-        Button _action, _offerA, _offerB, _sound, _guide;
+        Button _action, _offerA, _offerB, _sound, _guide, _practice, _skip;
         Font _font;
         GameState _lastState = (GameState)(-1);
         int _lastRaid = -1, _lastOffers = -1;
@@ -130,12 +130,14 @@ namespace Archer
             _hint = Label("Controls", _combat.transform, GameLanguage.Text("Hold · Aim · Release", "당기고 · 조준하고 · 놓기"), 12, Cream, Vector2.zero, new Vector2(1, 0), new Vector2(0, 128), new Vector2(-30, 44));
             _cancel = Button("Cancel shot", _combat.transform, GameLanguage.Text("Cancel", "취소"), new Vector2(1, 0), new Vector2(1, 0), new Vector2(-76, 230), new Vector2(120, 60), () => ArcherController.Instance?.CancelAim()).gameObject;
             _cancelRect = _cancel.GetComponent<RectTransform>();
+            _skip = Button("Skip practice", _combat.transform, GameLanguage.Text("Skip practice", "연습 건너뛰기"), Vector2.zero, Vector2.zero, new Vector2(96, 230), new Vector2(160, 48), () => GameManager.Instance?.SkipTutorial());
+            _skipRect = _skip.GetComponent<RectTransform>();
             _reticle = Box("Predicted impact", _combat.transform, Cream, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(6, 6));
             _hit = Box("Hit marker", _combat.transform, Gold, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(18, 2));
             _hit.rectTransform.localRotation = Quaternion.Euler(0, 0, 45);
             var hit2 = Box("Cross", _hit.transform, Gold, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(2, 18));
             _score = Label("Score", _combat.transform, "", 14, Gold, new Vector2(0,1), Vector2.one, new Vector2(0,-142), new Vector2(-36,44));
-            _bossPanel = Box("Brute status", _combat.transform, Ink, new Vector2(0,1), Vector2.one, new Vector2(0,-194), new Vector2(-40,64)).gameObject;
+            _bossPanel = Box("Brute status", _combat.transform, Ink, new Vector2(0,1), Vector2.one, new Vector2(0,-210), new Vector2(-40,64)).gameObject;
             _bossLabel = Label("Brute warning", _bossPanel.transform, "", 12, Cream, Vector2.zero, Vector2.one, new Vector2(0,8), new Vector2(-12,-12));
             _bossFill = Bar("Brute health", _bossPanel.transform, new Color(0.85f,0.35f,0.2f), Vector2.zero, new Vector2(1,0), new Vector2(0,10), new Vector2(-20,8));
             for (int i = 0; i < _numbers.Length; i++)
@@ -144,8 +146,11 @@ namespace Archer
                 _numbers[i].fontStyle = FontStyle.Bold;
                 _numbers[i].gameObject.SetActive(false);
             }
-            _toast = Label("Callout", _combat.transform, "", 24, Gold, new Vector2(0, 0.74f), new Vector2(1, 0.74f), Vector2.zero, new Vector2(-32, 40));
-            _toastDetail = Label("Callout detail", _combat.transform, "", 14, Cream, new Vector2(0, 0.74f), new Vector2(1, 0.74f), new Vector2(0, -40), new Vector2(-32, 40));
+            _toast = Label("Callout", _combat.transform, "", 24, Gold, new Vector2(0, 0.66f), new Vector2(1, 0.66f), Vector2.zero, new Vector2(-32, 40));
+            _toastDetail = Label("Callout detail", _combat.transform, "", 14, Cream, new Vector2(0, 0.66f), new Vector2(1, 0.66f), new Vector2(0, -40), new Vector2(-32, 40));
+            _objective = Label("Objective", _combat.transform, "", 17, Gold, new Vector2(0, 1), Vector2.one, new Vector2(0, -152), new Vector2(-44, 44));
+            _objective.fontStyle = FontStyle.Bold;
+            _objectiveSub = Label("Objective detail", _combat.transform, "", 14, Cream, new Vector2(0, 1), Vector2.one, new Vector2(0, -214), new Vector2(-44, 80));
         }
 
         void Start()
@@ -180,6 +185,7 @@ namespace Archer
             _offerA = Button("Upgrade A", _panel, "", new Vector2(0, 0.49f), new Vector2(1, 0.49f), Vector2.zero, new Vector2(-36, 96), () => Choose(0));
             _offerB = Button("Upgrade B", _panel, "", new Vector2(0, 0.33f), new Vector2(1, 0.33f), Vector2.zero, new Vector2(-36, 96), () => Choose(1));
             _action = Button("Primary action", _panel, "Begin Raid 1", new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 55), new Vector2(-36, 68), Act, true);
+            _practice = Button("Practice", _panel, "Practice", new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 140), new Vector2(-36, 56), () => GameManager.Instance?.StartTutorial());
             _sound = Button("Sound toggle", _overlay.transform, "", new Vector2(0.08f, 0.12f), new Vector2(0.48f, 0.12f), Vector2.zero, new Vector2(0, 64), () => { PlayerPrefs.SetInt("LastRanger.Sound", 1-PlayerPrefs.GetInt("LastRanger.Sound", 1)); PlayerPrefs.Save(); });
             _guide = Button("Guide toggle", _overlay.transform, "", new Vector2(0.52f, 0.12f), new Vector2(0.92f, 0.12f), Vector2.zero, new Vector2(0, 64), () => { var a = ArcherController.Instance; if (a != null) { a.ShowAimGuide = !a.ShowAimGuide; PlayerPrefs.SetInt("LastRanger.Guide", a.ShowAimGuide ? 1 : 0); PlayerPrefs.Save(); } });
             _soundLabel = _sound.GetComponentInChildren<Text>();
@@ -199,7 +205,7 @@ namespace Archer
             var gm = GameManager.Instance;
             if (gm == null) return;
             if (gm.State == GameState.Paused) gm.TogglePause();
-            else if (gm.State == GameState.Intermission) gm.StartRaid();
+            else if (gm.State == GameState.Intermission) gm.BeginRun();
             else gm.Restart();
         }
 
@@ -216,7 +222,8 @@ namespace Archer
             if (h == null) return false;
             if (h._overlay.activeSelf) return true;
             return (h._pause.activeSelf && RectTransformUtility.RectangleContainsScreenPoint(h._pauseRect, screen))
-                || (h._cancel.activeSelf && RectTransformUtility.RectangleContainsScreenPoint(h._cancelRect, screen));
+                || (h._cancel.activeSelf && RectTransformUtility.RectangleContainsScreenPoint(h._cancelRect, screen))
+                || (h._skip.gameObject.activeSelf && RectTransformUtility.RectangleContainsScreenPoint(h._skipRect, screen));
         }
 
         static void Fill(Image image, float value)
@@ -231,17 +238,25 @@ namespace Archer
             if (gm == null || archer == null) return;
             if (_lastSafe != Screen.safeArea) ApplySafeArea();
             bool playing = gm.State == GameState.Playing;
-            _combat.SetActive(playing);
-            _overlay.SetActive(!playing);
+            bool tutorial = gm.State == GameState.Tutorial;
+            _combat.SetActive(playing || tutorial);
+            _overlay.SetActive(!playing && !tutorial);
             _hp.text = GameLanguage.Text($"{Mathf.CeilToInt(gm.Health)}/{Mathf.CeilToInt(gm.MaxHealth)} HP", $"체력 {Mathf.CeilToInt(gm.Health)}/{Mathf.CeilToInt(gm.MaxHealth)}");
             Fill(_healthFill, gm.Health / Mathf.Max(1, gm.MaxHealth));
-            _raid.text = GameLanguage.Text($"RAID {gm.RaidNumber}/{GameManager.TotalRaids}", $"습격 {gm.RaidNumber}/{GameManager.TotalRaids}");
-            _enemies.text = GameLanguage.Text($"{gm.MonstersRemaining} enemies", $"남은 적 {gm.MonstersRemaining}");
+            _raid.text = tutorial
+                ? GameLanguage.Text("PRACTICE", "연습")
+                : GameLanguage.Text($"RAID {gm.RaidNumber}/{GameManager.TotalRaids}", $"습격 {gm.RaidNumber}/{GameManager.TotalRaids}");
+            _enemies.text = tutorial
+                ? GameLanguage.Text("free arrows", "화살 무제한")
+                : GameLanguage.Text($"{gm.MonstersRemaining} enemies", $"남은 적 {gm.MonstersRemaining}");
+            _score.gameObject.SetActive(!tutorial);
             _score.text = GameLanguage.Text($"{gm.Score} PTS · ×{gm.ScoreMultiplier} · {gm.HitStreak} HITS", $"{gm.Score}점 · ×{gm.ScoreMultiplier} · {gm.HitStreak}연속");
             _bossPanel.SetActive(gm.Boss != null && !gm.Boss.IsDead);
             if (gm.Boss != null)
             {
-                _bossLabel.text = gm.Boss.IsWinding ? GameLanguage.Text("ATTACK! HEADSHOT!", "공격 임박! 머리를 노리세요") : GameLanguage.Text("THE BRUTE", "오우거");
+                _bossLabel.text = gm.Boss.IsWinding
+                    ? GameLanguage.Text($"ATTACK IN {gm.Boss.WindupRemaining:0.0}s · HEADSHOT TO INTERRUPT", $"공격 {gm.Boss.WindupRemaining:0.0}초 전 · 머리를 맞혀 저지")
+                    : GameLanguage.Text("THE BRUTE", "오우거");
                 Fill(_bossFill, gm.Boss.Health / gm.Boss.MaxHealth);
             }
             _ammo.text = gm.Arrows == 0 ? GameLanguage.Text("EMPTY · RECOVERING", "화살 보충 중") : GameLanguage.Text($"QUIVER  {gm.Arrows} / {gm.MaxArrows}", $"화살 {gm.Arrows} / {gm.MaxArrows}");
@@ -257,7 +272,17 @@ namespace Archer
             _cancel.SetActive(archer.IsAiming);
             Fill(_chargeFill, archer.Charge01);
             _drawLabel.text = archer.Charge01 >= 0.99f ? GameLanguage.Text("FULL DRAW", "최대 장력") : GameLanguage.Text($"DRAW  {Mathf.RoundToInt(archer.Charge01*100)}%", $"장력 {Mathf.RoundToInt(archer.Charge01*100)}%");
-            _hint.gameObject.SetActive(!archer.IsAiming && gm.RaidNumber <= 2);
+            _hint.gameObject.SetActive(!archer.IsAiming && playing && gm.RaidNumber <= 2);
+            var tut = tutorial ? gm.Tutorial : null;
+            bool hasTut = tut != null && tut.Active;
+            _objective.gameObject.SetActive(tutorial && hasTut);
+            _objectiveSub.gameObject.SetActive(tutorial && hasTut);
+            if (tutorial && hasTut)
+            {
+                string progress = tut.HitsNeeded > 1 ? $"  {tut.HitsThisStep}/{tut.HitsNeeded}" : "";
+                _objective.text = tut.ObjectiveTitle() + progress;
+                _objectiveSub.text = tut.ObjectiveHint();
+            }
             Vector2 reticle = archer.IsAiming ? archer.ReticlePosition : new Vector2(Screen.width*0.5f, Screen.height*0.5f);
             RectTransformUtility.ScreenPointToLocalPointInRectangle(_combat.GetComponent<RectTransform>(), reticle, null, out var point);
             _reticle.rectTransform.anchoredPosition = point;
@@ -308,10 +333,12 @@ namespace Archer
             bool pause = gm.State == GameState.Paused;
             bool victory = gm.State == GameState.Victory;
             _brand.text = intro ? GameLanguage.Text("THE FOREST WATCH", "숲의 수호자") : supply ? GameLanguage.Text("VILLAGE SUPPLY POST", "마을 보급소") : pause ? GameLanguage.Text("TAKE A BREATH", "잠시 쉬어 가세요") : GameLanguage.Text("THE FOREST WATCH", "숲의 수호자");
-            _title.text = intro ? GameLanguage.Text("LAST RANGER", "라스트 레인저") : supply ? GameLanguage.Text($"RAID {gm.RaidNumber} CLEARED", $"습격 {gm.RaidNumber} 격퇴") : pause ? GameLanguage.Text("WATCH PAUSED", "일시 정지") : victory ? GameLanguage.Text("VILLAGE DEFENDED", "마을 방어 성공") : GameLanguage.Text("THE DEFENSE FELL", "방어 실패");
+            _title.text = intro ? GameLanguage.Text("LAST RANGER", "라스트 레인저") : supply ? GameLanguage.Text($"RAID {gm.RaidNumber} CLEARED", $"습격 {gm.RaidNumber} 격퇴") : pause ? GameLanguage.Text("WATCH PAUSED", "일시 정지") : victory ? GameLanguage.Text("CHAPTER ONE CLEARED", "1장 완료") : GameLanguage.Text("THE DEFENSE FELL", "방어 실패");
             _title.fontSize = 38;
-            _subtitle.text = intro ? GameLanguage.Text("One bow. Twenty raids.\nA village counting on you.", "하나의 활로 스무 습격을.\n당신의 마을을 지키세요.") : supply ? GameLanguage.Text($"Next: {GameManager.RaidTitle(gm.RaidNumber+1)}", $"다음: {GameManager.RaidTitle(gm.RaidNumber+1)}") : pause ? GameLanguage.Text("Your shot has been safely cancelled.", "당기던 활을 내렸습니다.") : victory ? GameLanguage.Text("The path is quiet. Your village is safe.", "숲길이 고요해졌습니다.\n마을을 지켜냈습니다.") : GameLanguage.Text("Return to the gate. Try a new approach.", "다시 활을 들고\n마을을 지켜 주세요.");
-            _stats.text = intro ? GameLanguage.Text("Hold to draw.\nAim, then release.\nAim higher at distance.", "길게 눌러 활을 당기세요.\n조준한 뒤 손을 놓으세요.\n멀수록 높게 조준하세요.") : supply ? (gm.Offers.Count == 0 ? GameLanguage.Text("Supplies taken.\nReady for the next watch.", "보급품을 받았습니다.\n다음 습격에 대비하세요.") : "") : pause ? GameLanguage.Text("Hold to draw.\nRelease to fire.\nCancel to lower your bow.", "길게 눌러 활을 당기세요.\n손을 놓으면 발사합니다.\n취소하면 활을 내립니다.") : GameLanguage.Text($"SCORE {gm.Score:00000}\n{gm.RaidsCleared} raids · {gm.Kills} kills\n{Mathf.RoundToInt(gm.Accuracy*100)}% hit · {gm.Headshots} headshots\nBest streak: {gm.BestStreak} hits", $"점수 {gm.Score:00000}\n{gm.RaidsCleared}회 격퇴 · {gm.Kills}마리 처치\n명중률 {Mathf.RoundToInt(gm.Accuracy*100)}% · 머리 {gm.Headshots}회\n최고 연속 명중 {gm.BestStreak}회");
+            _subtitle.text = intro ? GameLanguage.Text("One bow. Five raids.\nA village counting on you.", "하나의 활로 다섯 습격을.\n당신의 마을을 지키세요.") : supply ? GameLanguage.Text($"Next: {GameManager.RaidTitle(gm.RaidNumber+1)}", $"다음: {GameManager.RaidTitle(gm.RaidNumber+1)}") : pause ? GameLanguage.Text("Your shot has been safely cancelled.", "당기던 활을 내렸습니다.") : victory ? GameLanguage.Text("Five raids held. The forest watch stands.", "다섯 번의 습격을 막아냈습니다.\n숲의 수호자는 건재합니다.") : GameLanguage.Text("Return to the gate. Try a new approach.", "다시 활을 들고\n마을을 지켜 주세요.");
+            _stats.text = intro ? GameLanguage.Text("Hold to draw.\nAim, then release.\nAim higher at distance.", "길게 눌러 활을 당기세요.\n조준한 뒤 손을 놓으세요.\n멀수록 높게 조준하세요.") : supply ? (gm.Offers.Count == 0 ? GameLanguage.Text("Supplies taken.\nReady for the next watch.", "보급품을 받았습니다.\n다음 습격에 대비하세요.") : "") : pause ? GameLanguage.Text("Hold to draw.\nRelease to fire.\nCancel to lower your bow.", "길게 눌러 활을 당기세요.\n손을 놓으면 발사합니다.\n취소하면 활을 내립니다.") : GameLanguage.Text($"SCORE {gm.Score:00000}\n{gm.RaidsCleared} raids · {gm.Kills} kills\n{Mathf.RoundToInt(gm.Accuracy*100)}% hit · {gm.Headshots} headshots\nBlocked {gm.Blocked} · short {gm.FellShort} · wide {gm.WideMisses}", $"점수 {gm.Score:00000}\n{gm.RaidsCleared}회 격퇴 · {gm.Kills}마리 처치\n명중률 {Mathf.RoundToInt(gm.Accuracy*100)}% · 머리 {gm.Headshots}회\n방패 {gm.Blocked} · 짧음 {gm.FellShort} · 빗나감 {gm.WideMisses}");
+            _practice.gameObject.SetActive(intro);
+            _skip.gameObject.SetActive(gm.State == GameState.Tutorial);
             _offerA.gameObject.SetActive(supply && gm.Offers.Count>0);
             _offerB.gameObject.SetActive(supply && gm.Offers.Count>1);
             for(int i=0;i<gm.Offers.Count && i<2;i++)
@@ -321,6 +348,9 @@ namespace Archer
             }
             _action.interactable = !supply || gm.Offers.Count==0;
             _action.GetComponentInChildren<Text>().text = intro ? GameLanguage.Text("Begin the Watch", "방어 시작") : supply ? (gm.Offers.Count>0 ? GameLanguage.Text("Choose supplies", "보급품 선택") : GameLanguage.Text($"Begin Raid {gm.RaidNumber+1}", $"습격 {gm.RaidNumber+1} 시작")) : pause ? GameLanguage.Text("Resume Watch", "계속하기") : GameLanguage.Text("Defend Again", "다시 도전");
+            _practice.GetComponentInChildren<Text>().text = PlayerPrefs.GetInt("LastRanger.Practiced", 0) == 1
+                ? GameLanguage.Text("Practice again", "연습 다시 하기")
+                : GameLanguage.Text("Practice first", "먼저 연습하기");
         }
 
         void OnDestroy() { if (_feedback != null) { _feedback.Impact -= ShowImpact; _feedback.Cleared -= ClearImpacts; } if (Instance == this) Instance = null; }

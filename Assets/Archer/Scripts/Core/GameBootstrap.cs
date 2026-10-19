@@ -190,7 +190,7 @@ namespace Archer
             controller.MaxPitch = MaxPitch;
             controller.MaxYaw = MaxYaw;
             controller.ArrowDamage = ArrowDamage;
-            controller.ShowAimGuide = PlayerPrefs.GetInt("LastRanger.Guide", 0) == 1;
+            controller.ShowAimGuide = PlayerPrefs.GetInt("LastRanger.Guide", 1) == 1;   // on by default for beginners
             controller.Initialize(_archerRoot.transform, _arrowParent);
         }
 

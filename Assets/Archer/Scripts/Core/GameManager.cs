@@ -6,6 +6,7 @@ namespace Archer
     public enum GameState
     {
         Playing,
+        Tutorial,
         Intermission,
         GameOver,
         Paused,
@@ -20,7 +21,18 @@ namespace Archer
         Damage,
         Arrows,
         QuickDraw,
-        Recovery
+        Recovery,
+        Piercing,
+        Slowing,
+        HeadshotRefund
+    }
+
+    /// <summary>Why a shot failed to damage an enemy — distinct feedback for each.</summary>
+    public enum MissReason
+    {
+        Blocked,   // stopped by a shield
+        Short,     // hit the ground / scenery before reaching the enemy line
+        Missed     // travelled past or wide of the enemy
     }
 
     /// <summary>
@@ -30,7 +42,9 @@ namespace Archer
     public class GameManager : MonoBehaviour
     {
         public static GameManager Instance { get; private set; }
-        public const int TotalRaids = 20;
+
+        /// <summary>Length of the first chapter. The loop extends past this if playtests want more.</summary>
+        public const int TotalRaids = 5;
 
         [Header("Archer")]
         public float MaxHealth = 100f;
@@ -53,6 +67,17 @@ namespace Archer
         public float ArrowPowerStep = 8f;
         public int ExtraArrowsStep = 2;
 
+        [Header("Shot-changing upgrades")]
+        [Tooltip("How many enemies a piercing arrow passes through after the first.")]
+        public int PierceCapacity = 1;
+        [Tooltip("Movement multiplier applied by a slowing shot.")]
+        public float SlowFactor = 0.45f;
+        [Tooltip("Seconds a slowing shot lingers on its target.")]
+        public float SlowDuration = 2.2f;
+        public bool Piercing;
+        public bool SlowingShot;
+        public bool RefundHeadshotKills;
+
         public GameState State { get; private set; } = GameState.Intermission;
         public int RaidNumber { get; private set; }
         public int MonstersRemaining { get; private set; }
@@ -68,25 +93,90 @@ namespace Archer
         public int Headshots { get; private set; }
         public int HitStreak { get; private set; }
         public int BestStreak { get; private set; }
+        public int Blocked { get; private set; }
+        public int FellShort { get; private set; }
+        public int WideMisses { get; private set; }
         public int ScoreMultiplier => 1 + Mathf.Min(2, HitStreak / 3);
         public Monster Boss { get; private set; }
         public int SpawnedThisRaid => _spawnIndex;
         public float Accuracy => ShotsFired > 0 ? (float)ShotsHit / ShotsFired : 0f;
 
+        /// <summary>Raised whenever a shot lands on an enemy (headshot flag included).</summary>
+        public event System.Action<Monster, bool> MonsterHit;
+        /// <summary>Raised whenever a shot fails, with the reason and world point.</summary>
+        public event System.Action<MissReason, Vector3> Missed;
+
         public void RegisterShot() { if (State == GameState.Playing) ShotsFired++; }
+
         public void RegisterHit(bool headshot = false)
         {
+            // Practice hits should not inflate the run's accuracy, but they are
+            // still the player's first successful shot for playtest timing.
+            if (State == GameState.Tutorial) { Telemetry.FirstHit(); return; }
             if (State != GameState.Playing) return;
             ShotsHit++;
             HitStreak++;
             BestStreak = Mathf.Max(BestStreak, HitStreak);
             if (headshot) Headshots++;
             Score += (headshot ? 75 : 25) * ScoreMultiplier;
+            if (ShotsHit == 1) Telemetry.FirstHit();
         }
 
-        public void RegisterMiss()
+        public void NotifyMonsterHit(Monster monster, bool headshot)
         {
-            if (State == GameState.Playing) HitStreak = 0;
+            if (monster == null) return;
+            MonsterHit?.Invoke(monster, headshot);
+        }
+
+        /// <summary>Break the precision streak and record why the shot failed.</summary>
+        public void ReportMiss(MissReason reason, Vector3 position)
+        {
+            bool tutorial = State == GameState.Tutorial;
+            if (State != GameState.Playing && !tutorial) return;
+            HitStreak = 0;
+            // Practice misses coach the player but must not pollute run statistics.
+            if (!tutorial)
+            {
+                switch (reason)
+                {
+                    case MissReason.Blocked: Blocked++; break;
+                    case MissReason.Short: FellShort++; break;
+                    default: WideMisses++; break;
+                }
+            }
+            Missed?.Invoke(reason, position);
+        }
+
+        /// <summary>Kept for compatibility: an unclassified miss is treated as a wide miss.</summary>
+        public void RegisterMiss() => ReportMiss(MissReason.Missed, Vector3.zero);
+
+        /// <summary>
+        /// Classify an environmental impact: an arrow that lands before the enemy
+        /// line fell short; one that lands beyond it flew past.
+        /// </summary>
+        public MissReason ClassifyEnvironmentMiss(Vector3 point)
+        {
+            float landed = new Vector2(point.x, point.z).magnitude;
+            float nearest = float.MaxValue;
+            foreach (var m in _monsters)
+            {
+                if (m == null || m.IsDead) continue;
+                float d = new Vector2(m.transform.position.x, m.transform.position.z).magnitude;
+                if (d < nearest) nearest = d;
+            }
+            // Practice targets are not in the raid list; include them so practice
+            // misses are classified against the dummy the player is aiming at.
+            if (nearest == float.MaxValue)
+            {
+                foreach (var m in FindObjectsByType<Monster>(FindObjectsSortMode.None))
+                {
+                    if (m == null || m.IsDead) continue;
+                    float d = new Vector2(m.transform.position.x, m.transform.position.z).magnitude;
+                    if (d < nearest) nearest = d;
+                }
+            }
+            if (nearest == float.MaxValue) return MissReason.Short;   // nothing left to reach
+            return landed < nearest - 0.75f ? MissReason.Short : MissReason.Missed;
         }
 
         public Transform MonsterParent;
@@ -94,7 +184,7 @@ namespace Archer
         public Monster[] ActiveMonsters => _monsters.ToArray();
 
         readonly List<Monster> _monsters = new List<Monster>();
-        readonly List<MonsterRole> _spawnQueue = new List<MonsterRole>();
+        readonly List<SpawnOrder> _spawnQueue = new List<SpawnOrder>();
         int _spawnIndex;
         float _spawnTimer;
         float _arrowTimer;
@@ -113,6 +203,9 @@ namespace Archer
         public IReadOnlyList<UpgradeKind> Offers => _offers;
         readonly List<UpgradeKind> _offers = new List<UpgradeKind>();
 
+        /// <summary>The tutorial director, available once Start has run.</summary>
+        public TutorialDirector Tutorial { get; private set; }
+
         void Awake()
         {
             Instance = this;
@@ -125,6 +218,7 @@ namespace Archer
             _baseArrowDamage = Archer != null ? Archer.ArrowDamage : 0f;
             _baseChargeTime = Archer != null ? Archer.ChargeTime : 0.85f;
             _baseRegenInterval = ArrowRegenInterval;
+            Tutorial = gameObject.AddComponent<TutorialDirector>();
         }
 
         void RollOffers()
@@ -135,11 +229,24 @@ namespace Archer
             if (ArrowRegenInterval > 0.51f) pool.Add(UpgradeKind.Recovery);
             if (Health < MaxHealth) pool.Add(UpgradeKind.Heal);   // don't offer a useless heal
 
+            // Surface one shot-changing upgrade whenever one is still available, so
+            // the choice is about how you shoot, not only how big the numbers are.
+            var special = new List<UpgradeKind>();
+            if (!Piercing) special.Add(UpgradeKind.Piercing);
+            if (!SlowingShot) special.Add(UpgradeKind.Slowing);
+            if (!RefundHeadshotKills) special.Add(UpgradeKind.HeadshotRefund);
+
             if (Health < MaxHealth * 0.4f)
             {
                 _offers.Add(UpgradeKind.Heal);
                 pool.Remove(UpgradeKind.Heal);
             }
+            else if (special.Count > 0)
+            {
+                int j = Random.Range(0, special.Count);
+                _offers.Add(special[j]);
+            }
+
             while (_offers.Count < 2 && pool.Count > 0)
             {
                 int j = Random.Range(0, pool.Count);
@@ -156,6 +263,9 @@ namespace Archer
             UpgradeKind.Arrows => GameLanguage.Text($"Deep quiver\n{MaxArrows} → {MaxArrows+ExtraArrowsStep} arrows", $"큰 화살통\n화살 {MaxArrows} → {MaxArrows+ExtraArrowsStep}개"),
             UpgradeKind.QuickDraw => GameLanguage.Text($"Quickdraw\n{Archer.ChargeTime:0.00}s → {Mathf.Max(0.45f,Archer.ChargeTime*0.8f):0.00}s draw", $"빠른 시위\n당기기 {Archer.ChargeTime:0.00} → {Mathf.Max(0.45f,Archer.ChargeTime*0.8f):0.00}초"),
             UpgradeKind.Recovery => GameLanguage.Text($"Fletcher\n{ArrowRegenInterval:0.00}s → {Mathf.Max(0.5f,ArrowRegenInterval*0.8f):0.00}s recovery", $"화살 보급\n보충 {ArrowRegenInterval:0.00} → {Mathf.Max(0.5f,ArrowRegenInterval*0.8f):0.00}초"),
+            UpgradeKind.Piercing => GameLanguage.Text("Bodkin points\nArrows punch through\nthe first enemy", $"관통 촉\n화살이 첫 적을\n꿰뚫고 지나갑니다"),
+            UpgradeKind.Slowing => GameLanguage.Text("Hamstring shot\nHits slow the enemy\nfor a moment", $"급소 사격\n명중한 적의\n이동 속도를 늦춥니다"),
+            UpgradeKind.HeadshotRefund => GameLanguage.Text("Recover\nHeadshot kills\nreturn one arrow", $"회수\n머리로 처치하면\n화살 1개를 되찾습니다"),
             _ => kind.ToString()
         };
 
@@ -164,6 +274,7 @@ namespace Archer
         {
             if (State != GameState.Intermission || !_offers.Contains(kind)) return;
             ApplyUpgrade(kind);
+            Telemetry.UpgradeChosen(kind.ToString());
             _offers.Clear();
         }
 
@@ -191,6 +302,15 @@ namespace Archer
                     MaxArrows += ExtraArrowsStep;
                     Arrows = MaxArrows;
                     break;
+                case UpgradeKind.Piercing:
+                    Piercing = true;
+                    break;
+                case UpgradeKind.Slowing:
+                    SlowingShot = true;
+                    break;
+                case UpgradeKind.HeadshotRefund:
+                    RefundHeadshotKills = true;
+                    break;
             }
         }
 
@@ -217,27 +337,26 @@ namespace Archer
             _spawnTimer -= Time.deltaTime;
             if (_spawnTimer > 0f) return;
 
-            // Small groups create a short breathing space before the next approach.
-            _spawnTimer = SpawnInterval * (_spawnIndex % 2 == 1 ? 2.1f : 1f);
-            SpawnMonster(_spawnQueue[_spawnIndex], _spawnIndex);
+            SpawnMonster(_spawnQueue[_spawnIndex]);
             _spawnIndex++;
+            // The next group's authored delay, scaled so tests can compress the pacing.
+            _spawnTimer = _spawnIndex < _spawnQueue.Count
+                ? _spawnQueue[_spawnIndex].Delay * SpawnInterval : 0f;
         }
 
-        void SpawnMonster(MonsterRole role, int index)
+        void SpawnMonster(SpawnOrder order)
         {
-            // Alternate lanes to separate successive spawns without marching left to right.
-            float[] lanes = { -0.6f, 0.6f, 0f, -0.3f, 0.3f };
-            float x = lanes[index % lanes.Length] * SpawnHalfWidth + Random.Range(-0.25f, 0.25f);
-            float z = Random.Range(SpawnNearZ, SpawnFarZ);
+            float x = Mathf.Clamp(order.Lane, -1f, 1f) * SpawnHalfWidth + Random.Range(-0.25f, 0.25f);
+            float z = order.Z > 0f ? order.Z : Random.Range(SpawnNearZ, SpawnFarZ);
 
-            RoleStats(role, RaidNumber, out float health, out float speed, out float damage);
-            Color color = RoleColor(role);
+            RoleStats(order.Role, RaidNumber, out float health, out float speed, out float damage);
+            Color color = RoleColor(order.Role);
 
-            var m = Monster.Create(MonsterParent, new Vector3(x, 0f, z), ArcherTarget, role,
+            var m = Monster.Create(MonsterParent, new Vector3(x, 0f, z), ArcherTarget, order.Role,
                 health, speed, damage, 1.0f, color);
             m.Died += OnMonsterDied;
             _monsters.Add(m);
-            if (role == MonsterRole.Ogre)
+            if (order.Role == MonsterRole.Ogre)
             {
                 Boss = m;
                 GameFeedback.Instance?.Notify(GameLanguage.Text("THE BRUTE APPROACHES", "오우거가 다가옵니다"), GameLanguage.Text("Headshots interrupt his swing", "머리를 맞히면 공격을 막습니다"), 3f);
@@ -254,10 +373,10 @@ namespace Archer
                 case MonsterRole.Ogre: health = 300f; speed = 1.5f; damage = 20f; break;
                 default: health = 40f; speed = 2.3f; damage = 8f; break;   // Raider
             }
-            int extra = Mathf.Max(0, raid - 1);
-            health *= 1f + 0.06f * extra;
+            int extra = Mathf.Max(0, raid - TotalRaids);
+            health *= 1f + 0.08f * extra;
             speed *= 1f + 0.02f * extra;
-            damage *= 1f + 0.03f * extra;
+            damage *= 1f + 0.04f * extra;
         }
 
         // Bright, saturated values so enemies read against the cool forest.
@@ -271,10 +390,57 @@ namespace Archer
 
         public bool TryConsumeArrow()
         {
-            if (State != GameState.Playing) return false;
+            if (State != GameState.Playing && State != GameState.Tutorial) return false;
+            if (State == GameState.Tutorial) return true;   // practice fires freely
             if (Arrows <= 0) return false;
             Arrows--;
             return true;
+        }
+
+        /// <summary>Start the opening practice: still target, moving goblin, shielded head.</summary>
+        public void StartTutorial()
+        {
+            if (State != GameState.Intermission || _offers.Count > 0) return;
+            Archer?.CancelAim();
+            ClearProjectiles();
+            ClearMonsters();
+            Arrows = MaxArrows;
+            _arrowTimer = 0f;
+            _offers.Clear();
+            Boss = null;
+            State = GameState.Tutorial;
+            Telemetry.EnsureRun();
+            Tutorial?.Begin();
+        }
+
+        /// <summary>Front-door entry used by the intro screen: practice first, then raid one.</summary>
+        public void BeginRun()
+        {
+            if (State != GameState.Intermission || _offers.Count > 0) return;
+            if (PlayerPrefs.GetInt("LastRanger.Practiced", 0) == 1) StartRaid();
+            else StartTutorial();
+        }
+
+        /// <summary>Leave practice and begin the first real raid.</summary>
+        public void FinishTutorial()
+        {
+            if (State != GameState.Tutorial) return;
+            PlayerPrefs.SetInt("LastRanger.Practiced", 1);
+            PlayerPrefs.Save();
+            State = GameState.Intermission;
+            ClearMonsters();
+            StartRaid();
+        }
+
+        /// <summary>Skip practice entirely (returning players or a fast retry).</summary>
+        public void SkipTutorial()
+        {
+            if (State != GameState.Tutorial && State != GameState.Intermission) return;
+            PlayerPrefs.SetInt("LastRanger.Practiced", 1);
+            PlayerPrefs.Save();
+            State = GameState.Intermission;
+            ClearMonsters();
+            StartRaid();
         }
 
         public void StartRaid()
@@ -292,62 +458,32 @@ namespace Archer
             _offers.Clear();
             Boss = null;
 
-            ComposeRaid(RaidNumber, _spawnQueue);
+            RaidPlan.Build(RaidNumber, _spawnQueue);
             MonstersThisRaid = _spawnQueue.Count;
             MonstersRemaining = MonstersThisRaid;
             _spawnIndex = 0;
             _spawnTimer = 0.8f;
-            GameFeedback.Instance?.Notify(RaidTitle(RaidNumber), GameLanguage.Text("Hold the path", "숲길을 지키세요"), 2.5f);
+            _raidShotsAtStart = ShotsFired;
+            _raidHitsAtStart = ShotsHit;
+            Telemetry.RaidStarted(RaidNumber);
+            GameFeedback.Instance?.Notify(RaidTitle(RaidNumber), RaidSubtitle(RaidNumber), 2.5f);
         }
 
-        /// <summary>Twenty-raid defense, with an ogre every fifth raid.</summary>
-        static void ComposeRaid(int raid, List<MonsterRole> into, bool shuffle = true)
+        int _raidShotsAtStart, _raidHitsAtStart;
+
+        static string RaidSubtitle(int raid) => raid switch
         {
-            into.Clear();
-            int raiders, runners, shields, ogres;
-            switch (raid)
-            {
-                case 1: raiders = 5; runners = 0; shields = 0; ogres = 0; break;  // first signs
-                case 2: raiders = 4; runners = 2; shields = 0; ogres = 0; break;  // the rush
-                case 3: raiders = 4; runners = 1; shields = 2; ogres = 0; break;  // wooden shields
-                case 4: raiders = 4; runners = 3; shields = 2; ogres = 0; break;  // hold the path
-                case 5: raiders = 3; runners = 2; shields = 1; ogres = 1; break;  // the brute
-                default:
-                    raiders = 4 + Mathf.Max(0, raid - 6) / 4;
-                    runners = 2 + Mathf.Max(0, raid - 6) / 4;
-                    shields = 2 + Mathf.Max(0, raid - 6) / 5;
-                    ogres = raid % 5 == 0 ? 1 : 0;
-                    break;
-            }
-
-            var pool = new List<MonsterRole>(raiders + runners + shields + ogres);
-            for (int i = 0; i < ogres; i++) pool.Add(MonsterRole.Ogre);
-            for (int i = 0; i < raiders; i++) pool.Add(MonsterRole.Raider);
-            for (int i = 0; i < runners; i++) pool.Add(MonsterRole.Runner);
-            for (int i = 0; i < shields; i++) pool.Add(MonsterRole.Shield);
-
-            // Interleave everything but keep any ogre(s) at the front (headline).
-            for (int i = pool.Count - 1; shuffle && i > ogres; i--)
-            {
-                int j = Random.Range(ogres, i + 1);
-                (pool[i], pool[j]) = (pool[j], pool[i]);
-            }
-            into.AddRange(pool);
-        }
+            2 => GameLanguage.Text("Lead the runners", "달려오는 적을 앞서 겨누세요"),
+            3 => GameLanguage.Text("Aim above the shields", "방패 위를 노리세요"),
+            4 => GameLanguage.Text("Two lines, staggered", "두 갈래로 나뉘어 옵니다"),
+            5 => GameLanguage.Text("Break the brute's swing", "오우거의 공격을 끊으세요"),
+            _ => GameLanguage.Text("Hold the path", "숲길을 지키세요")
+        };
 
         /// <summary>Short description of the upcoming raid for the shop panel.</summary>
         public string UpcomingRaidSummary()
         {
-            var list = new List<MonsterRole>();
-            ComposeRaid(RaidNumber + 1, list, false);
-            int r = 0, run = 0, sh = 0, og = 0;
-            foreach (var role in list)
-            {
-                if (role == MonsterRole.Runner) run++;
-                else if (role == MonsterRole.Shield) sh++;
-                else if (role == MonsterRole.Ogre) og++;
-                else r++;
-            }
+            RaidPlan.Tally(RaidNumber + 1, out int r, out int run, out int sh, out int og);
             string s = GameLanguage.Text($"{r} Raider", $"전사 {r}");
             if (run > 0) s += GameLanguage.Text($", {run} Runner", $", 돌격병 {run}");
             if (sh > 0) s += GameLanguage.Text($", {sh} Shield", $", 방패병 {sh}");
@@ -364,14 +500,24 @@ namespace Archer
             Score += (monster.Role == MonsterRole.Ogre ? 500 : 100) * ScoreMultiplier;
             MonstersRemaining = Mathf.Max(0, MonstersRemaining - 1);
 
+            // A headshot kill returns an arrow once the upgrade is taken.
+            if (RefundHeadshotKills && monster.DiedFromHeadshot && Arrows < MaxArrows)
+            {
+                Arrows++;
+                GameFeedback.Instance?.Notify(GameLanguage.Text("ARROW RECOVERED", "화살 회수"), GameLanguage.Text("Headshot kill", "머리 처치"), 0.8f);
+            }
+
             if (MonstersRemaining <= 0)
             {
                 RaidsCleared++;
                 Score += 200;
-                State = RaidsCleared >= TotalRaids ? GameState.Victory : GameState.Intermission;
+                bool final = RaidsCleared >= TotalRaids;
+                State = final ? GameState.Victory : GameState.Intermission;
                 Archer?.CancelAim();
                 ClearProjectiles();
-                if (State == GameState.Intermission) RollOffers();
+                Telemetry.RaidCleared(RaidNumber, ShotsFired - _raidShotsAtStart, ShotsHit - _raidHitsAtStart);
+                if (final) Telemetry.RunEnded(true, RaidNumber);
+                if (!final) RollOffers();
                 GameFeedback.Instance?.Play(FeedbackSound.Clear);
             }
         }
@@ -390,6 +536,7 @@ namespace Archer
                 State = GameState.GameOver;
                 Archer?.CancelAim();
                 ClearProjectiles();
+                Telemetry.RunEnded(false, RaidNumber);
             }
         }
 
@@ -400,16 +547,16 @@ namespace Archer
             Time.timeScale = 1f;
             Archer?.CancelAim();
             ClearProjectiles();
-            foreach (var m in FindObjectsByType<Monster>(FindObjectsSortMode.None))
-                if (m != null) { m.gameObject.SetActive(false); Destroy(m.gameObject); }
-            _monsters.Clear();
+            ClearMonsters();
             _arrowTimer = 0f;
 
             // New game: clear upgrades, run stats and the day/night clock.
             if (Archer != null) { Archer.ArrowDamage = _baseArrowDamage; Archer.ChargeTime = _baseChargeTime; }
             ArrowRegenInterval = _baseRegenInterval;
+            Piercing = SlowingShot = RefundHeadshotKills = false;
             Boss = null;
             Score = Headshots = HitStreak = BestStreak = 0;
+            Blocked = FellShort = WideMisses = 0;
             CombatEffects.Instance?.Clear();
             GameFeedback.Instance?.ResetFeedback();
             MaxHealth = _baseMaxHealth;
@@ -426,13 +573,25 @@ namespace Archer
             RaidNumber = 0;
             Arrows = MaxArrows;
             State = GameState.Intermission;
+            Telemetry.RunStarted();
             StartRaid();
+        }
+
+        void ClearMonsters()
+        {
+            foreach (var m in FindObjectsByType<Monster>(FindObjectsSortMode.None))
+                if (m != null) { m.gameObject.SetActive(false); Destroy(m.gameObject); }
+            _monsters.Clear();
+            _spawnQueue.Clear();
         }
 
         public static string RaidTitle(int raid) => raid switch
         {
-            1 => GameLanguage.Text("FIRST SIGNS", "첫 번째 징조"), 2 => GameLanguage.Text("THE RUSH", "몰려오는 적"), 3 => GameLanguage.Text("WOODEN SHIELDS", "나무 방패"),
-            4 => GameLanguage.Text("HOLD THE PATH", "숲길 사수"), 5 => GameLanguage.Text("THE BRUTE", "오우거"), 20 => GameLanguage.Text("THE LAST STAND", "최후의 결전"),
+            1 => GameLanguage.Text("FIRST SIGNS", "첫 번째 징조"),
+            2 => GameLanguage.Text("THE RUSH", "몰려오는 적"),
+            3 => GameLanguage.Text("WOODEN SHIELDS", "나무 방패"),
+            4 => GameLanguage.Text("THE AMBUSH", "매복"),
+            5 => GameLanguage.Text("THE BRUTE", "오우거"),
             _ => raid % 5 == 0 ? GameLanguage.Text("THE BRUTE RETURNS", "돌아온 오우거") : GameLanguage.Text($"FOREST RAID {raid}", $"숲의 습격 {raid}")
         };
 
@@ -452,6 +611,11 @@ namespace Archer
         void OnApplicationPause(bool paused)
         {
             if (paused && State == GameState.Playing) TogglePause();
+        }
+
+        void OnApplicationQuit()
+        {
+            Telemetry.Quit(State.ToString(), RaidNumber);
         }
 
         public void ClearProjectiles()

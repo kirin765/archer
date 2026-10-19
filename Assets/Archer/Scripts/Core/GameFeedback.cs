@@ -117,7 +117,7 @@ namespace Archer
             // Restrained music balance: music stays quiet enough that the bow and enemy warnings remain clear.
             bool soundEnabled = PlayerPrefs.GetInt("LastRanger.Sound", 1) != 0;
             var gm = GameManager.Instance;
-            bool isPlaying = gm != null && gm.State == GameState.Playing;
+            bool isPlaying = gm != null && (gm.State == GameState.Playing || gm.State == GameState.Tutorial);
 
             if (_ambienceSource != null)
             {
@@ -182,8 +182,30 @@ namespace Archer
             Impact?.Invoke(position, blocked ? GameLanguage.Text("BLOCK", "막힘") : Mathf.CeilToInt(damage) + (critical ? "!" : ""),
                 blocked ? new Color(0.65f,0.83f,1f) : critical ? new Color(1f,0.79f,0.33f) : Color.white);
             CombatEffects.Instance?.Burst(position, blocked, false);
-            if (blocked) Notify(GameLanguage.Text("SHIELD BLOCKED", "방패에 막혔습니다"), GameLanguage.Text("Aim above the shield", "방패 위를 조준하세요"), 1f);
+            if (blocked)
+            {
+                // In practice the tutorial director owns the coaching copy.
+                if (GameManager.Instance == null || GameManager.Instance.State != GameState.Tutorial)
+                    Notify(GameLanguage.Text("SHIELD BLOCKED", "방패에 막혔습니다"), GameLanguage.Text("Aim above the shield", "방패 위를 조준하세요"), 1f);
+            }
             else if (critical) Notify(GameLanguage.Text("HEADSHOT", "머리 명중"), GameLanguage.Text("Precision damage", "치명적인 명중"), 0.7f);
+        }
+
+        /// <summary>
+        /// Coach the player after a shot that missed. Blocked shots are shown by
+        /// <see cref="Hit"/> instead, so they are ignored here.
+        /// </summary>
+        public void Miss(MissReason reason, Vector3 position)
+        {
+            if (reason == MissReason.Blocked) return;
+            LastHitPosition = position;
+            if (reason == MissReason.Short)
+                Notify(GameLanguage.Text("FELL SHORT", "짧았습니다"),
+                    GameLanguage.Text("Draw longer, or aim a little higher", "더 당기거나 조금 더 높이 겨누세요"), 1.1f);
+            else
+                Notify(GameLanguage.Text("MISSED", "빗나갔습니다"),
+                    GameLanguage.Text("Lead the target as it moves", "움직이는 적의 앞을 겨누세요"), 1.1f);
+            Impact?.Invoke(position, GameLanguage.Text("MISS", "빗나감"), new Color(0.72f, 0.78f, 0.80f));
         }
 
         public void ResetFeedback()

@@ -13,14 +13,21 @@ namespace Archer
         [Tooltip("Damage multiplier when the arrow lands on a monster's head.")]
         public float HeadshotMultiplier = 1.75f;
 
+        public bool Piercing;
+        int _pierceRemaining;
+        float _slowFactor = 1f, _slowDuration;
+        readonly System.Collections.Generic.HashSet<Monster> _pierced = new();
+
         Rigidbody _rb;
+        Vector3 _flightVelocity;
         Material _headMaterial, _featherMaterial, _trailMaterial;
         TrailRenderer _trail;
         bool _spent;
         float _lifeTimer;
 
         public static Arrow Create(Transform parent, Vector3 position, Vector3 velocity,
-            float damage, Material shaftMaterial)
+            float damage, Material shaftMaterial, bool piercing = false, int pierceCapacity = 1,
+            float slowFactor = 1f, float slowDuration = 0f)
         {
             var root = new GameObject("Arrow");
             root.transform.SetParent(parent, false);
@@ -68,8 +75,13 @@ namespace Archer
             arrow._trail.receiveShadows = false;
             arrow._trail.numCapVertices = 2;
             arrow.Damage = damage;
+            arrow.Piercing = piercing;
+            arrow._pierceRemaining = piercing ? Mathf.Max(0, pierceCapacity) : 0;
+            arrow._slowFactor = slowFactor;
+            arrow._slowDuration = slowDuration;
             arrow._rb = rb;
             arrow._rb.linearVelocity = velocity;
+            arrow._flightVelocity = velocity;
 
             var flightClip = Resources.Load<AudioClip>("Audio/Arrow_Flight");
             if (flightClip != null && PlayerPrefs.GetInt("LastRanger.Sound", 1) != 0)
@@ -99,25 +111,33 @@ namespace Archer
             var v = _rb.linearVelocity;
             if (v.sqrMagnitude > 0.5f)
                 transform.rotation = Quaternion.LookRotation(v.normalized, Vector3.up);
+            if (v.sqrMagnitude > 0.5f) _flightVelocity = v;
         }
 
         void Update()
         {
             _lifeTimer += Time.deltaTime;
-            if (_lifeTimer > 10f && !_spent) { GameManager.Instance?.RegisterMiss(); Expire(); }
+            if (_lifeTimer > 10f && !_spent)
+            {
+                GameManager.Instance?.ReportMiss(MissReason.Missed, transform.position);
+                Expire();
+            }
         }
 
         void OnCollisionEnter(Collision collision)
         {
             if (_spent) return;
-            if (GameManager.Instance == null || GameManager.Instance.State != GameState.Playing)
+            var gm = GameManager.Instance;
+            if (gm == null || (gm.State != GameState.Playing && gm.State != GameState.Tutorial))
             { Expire(); return; }
+
+            Vector3 point = collision.GetContact(0).point;
 
             // A shield goblin's shield blocks the shot (aim over it, at the head).
             if (collision.collider.name == "Shield")
             {
-                GameManager.Instance?.RegisterMiss();
-                GameFeedback.Instance?.Hit(collision.GetContact(0).point, 0, false, true);
+                gm.ReportMiss(MissReason.Blocked, point);
+                GameFeedback.Instance?.Hit(point, 0, false, true);
                 Expire(collision.collider.transform);
                 return;
             }
@@ -125,19 +145,38 @@ namespace Archer
             var monster = collision.collider.GetComponentInParent<Monster>();
             if (monster != null)
             {
+                // Already passed through this one: ignore further contacts with it.
+                if (_pierced.Contains(monster)) return;
                 if (monster.IsDead) { Expire(); return; }
-                Vector3 point = collision.GetContact(0).point;
                 bool headshot = monster.IsHeadshot(point);
                 float damage = Damage * (headshot ? HeadshotMultiplier : 1f);
-                GameManager.Instance?.RegisterHit(headshot);
+                gm.RegisterHit(headshot);
                 GameFeedback.Instance?.Hit(point, damage, headshot, false);
+                if (_slowDuration > 0f) monster.ApplySlow(_slowFactor, _slowDuration);
+
+                // A piercing arrow passes through and keeps flying into the next enemy.
+                if (_pierceRemaining > 0)
+                {
+                    _pierceRemaining--;
+                    _pierced.Add(monster);
+                    monster.TakeDamage(damage, headshot);
+                    gm.NotifyMonsterHit(monster, headshot);
+                    // Restore the pre-impact flight so the deflection doesn't rob the shot.
+                    if (_rb != null) _rb.linearVelocity = _flightVelocity;
+                    return;
+                }
+
                 monster.TakeDamage(damage, headshot);
+                gm.NotifyMonsterHit(monster, headshot);
                 Expire(monster.transform);
                 return;
             }
 
-            // A resolved miss breaks the precision streak exactly once.
-            GameManager.Instance?.RegisterMiss();
+            // A resolved miss: tell short from wide so feedback can coach the shot.
+            // In practice the tutorial director owns the coaching copy.
+            var reason = gm.ClassifyEnvironmentMiss(point);
+            gm.ReportMiss(reason, point);
+            if (gm.State != GameState.Tutorial) GameFeedback.Instance?.Miss(reason, point);
             Expire();
         }
 

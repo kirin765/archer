@@ -26,6 +26,8 @@ namespace Archer
         public float FullDrawScreenFraction = 0.34f;
         [Tooltip("Multiplier on up/down drag -> shot angle response. Below 1 = less sensitive.")]
         public float VerticalAimSensitivity = 0.5f;
+        [Tooltip("On touch screens, raise the aim point above the finger by this fraction of screen height so the target stays visible.")]
+        [Range(0f, 0.2f)] public float TouchAimLiftFraction = 0.08f;
 
         [Header("Arrow")]
         public float ArrowDamage = 34f;
@@ -38,7 +40,7 @@ namespace Archer
         [Tooltip("Roll of the bow about the aim axis, in degrees. 90 lays the bow horizontal.")]
         public float BowRoll = 28f;
         [Tooltip("Draw the predicted arrow-path guide line while aiming.")]
-        public bool ShowAimGuide = false;
+        public bool ShowAimGuide = true;
 
         Camera _camera;
         Transform _root;
@@ -186,13 +188,17 @@ namespace Archer
             var gm = GameManager.Instance;
             _recoil = Mathf.MoveTowards(_recoil, 0f, Time.deltaTime * 5f);
             if (!_aiming) UpdateVisuals();
+            // Practice always shows the trajectory guide: it is the teaching aid
+            // for gravity. Players can still turn it off for the raids themselves.
+            if (gm != null && gm.State == GameState.Tutorial) ShowAimGuide = true;
             // Aiming requires active play AND ammunition, so we never show a
             // draw/release that cannot launch an arrow.
             if (UnityEngine.InputSystem.Keyboard.current != null && UnityEngine.InputSystem.Keyboard.current.escapeKey.wasPressedThisFrame)
             {
                 if (_aiming) CancelAim(); else gm?.TogglePause();
             }
-            bool canAim = gm != null && gm.State == GameState.Playing && gm.Arrows > 0;
+            bool canAim = gm != null && (gm.State == GameState.Playing || gm.State == GameState.Tutorial)
+                && (gm.State == GameState.Tutorial || gm.Arrows > 0);
 
             // A finger already down when play (re)starts is the UI press that
             // started the raid, not a draw; require a fresh press first.
@@ -213,7 +219,6 @@ namespace Archer
 
             if (allow && InputService.PressedThisFrame)
                 BeginAim();
-
             if (_aiming && Hud.BlocksPointer(InputService.Position)) { CancelAim(); return; }
             if (_aiming)
             {
@@ -249,9 +254,24 @@ namespace Archer
             _aiming = true;
             _anchor = InputService.Position;
             _aimScreen = _anchor;
-            AimAtScreenPoint(_anchor);
+            AimAtScreenPoint(AimPoint(_anchor));
             _power = MinPower;
             _nockedArrow.gameObject.SetActive(true);
+        }
+
+        /// <summary>
+        /// Where the shot is actually aimed. On a phone the finger covers the
+        /// target, so the aim point is lifted above the touch; with a mouse the
+        /// pointer itself is the aim point.
+        /// </summary>
+        Vector2 AimPoint(Vector2 pointer) =>
+            LiftForTouch(pointer, InputService.IsTouch, TouchAimLiftFraction, Screen.height);
+
+        /// <summary>Pure helper so the touch offset can be verified without a device.</summary>
+        public static Vector2 LiftForTouch(Vector2 pointer, bool touch, float fraction, float screenHeight)
+        {
+            if (!touch || fraction <= 0f) return pointer;
+            return pointer + Vector2.up * (screenHeight * fraction);
         }
 
         void AimAtScreenPoint(Vector2 screen)
@@ -294,7 +314,7 @@ namespace Archer
         void UpdateAim(Vector2 pointer)
         {
             _aimScreen = pointer;
-            AimAtScreenPoint(_aimScreen);
+            AimAtScreenPoint(AimPoint(pointer));
         }
 
         void ResetPose()
@@ -405,7 +425,10 @@ namespace Archer
             Vector3 spawn = LaunchPosition;
             GameFeedback.Instance?.Play(FeedbackSound.Shot);
             _recoil = 1f;
-            Arrow.Create(_arrowParent, spawn, dir * CurrentSpeed, ArrowDamage, _arrowMaterial);
+            Arrow.Create(_arrowParent, spawn, dir * CurrentSpeed, ArrowDamage, _arrowMaterial,
+                gm.Piercing, gm.PierceCapacity,
+                gm.SlowingShot ? gm.SlowFactor : 1f,
+                gm.SlowingShot ? gm.SlowDuration : 0f);
         }
     }
 }

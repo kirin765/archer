@@ -7,18 +7,21 @@ namespace Archer
     public static class InputService
     {
         static int _frame = -1, _touchId = -1;
-        static bool _pressed, _held, _released;
+        static bool _pressed, _held, _released, _touch;
         static Vector2 _position;
         public static Vector2 Position { get { Read(); return _position; } }
         public static bool PressedThisFrame { get { Read(); return _pressed; } }
         public static bool Held { get { Read(); return _held; } }
         public static bool ReleasedThisFrame { get { Read(); return _released; } }
+        /// <summary>True while the current gesture comes from a touchscreen.</summary>
+        public static bool IsTouch { get { Read(); return _touch; } }
 
         static void Read()
         {
             if(_frame == Time.frameCount) return;
             _frame = Time.frameCount;
             _pressed = _released = false;
+            _touch = false;
             var screen = Touchscreen.current;
             if(screen != null)
             {
@@ -30,6 +33,7 @@ namespace Archer
                 }
                 if(_touchId >= 0)
                 {
+                    _touch = true;
                     foreach(var touch in screen.touches)
                     {
                         if(touch.touchId.ReadValue()!=_touchId) continue;

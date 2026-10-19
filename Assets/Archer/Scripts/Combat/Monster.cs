@@ -58,9 +58,19 @@ namespace Archer
         public bool IsDead { get; private set; }
         public bool IsWinding => _winding;
         public float WindupProgress => _winding ? 1f-Mathf.Clamp01(_windUpTimer / WindUp) : 0f;
+        /// <summary>Seconds left before the telegraphed blow lands (0 when not winding).</summary>
+        public float WindupRemaining => _winding ? Mathf.Max(0f, _windUpTimer) : 0f;
+
+        /// <summary>A tutorial dummy: it may walk, but it never winds up or deals damage.</summary>
+        public bool IsPractice { get; private set; }
+        /// <summary>True when the blow that killed this enemy was a headshot.</summary>
+        public bool DiedFromHeadshot { get; private set; }
+        /// <summary>1 when unslowed; a slowing shot lowers this toward 0 while the effect lasts.</summary>
+        public float SlowFactor => _slowFactor;
+        float _slowFactor = 1f, _slowTimer;
 
         public static Monster Create(Transform parent, Vector3 position, Transform target, MonsterRole role,
-            float health, float speed, float damage, float attackInterval, Color color)
+            float health, float speed, float damage, float attackInterval, Color color, bool practice = false)
         {
             var root = new GameObject("Monster_" + role);
             root.transform.SetParent(parent, false);
@@ -68,6 +78,7 @@ namespace Archer
 
             var monster = root.AddComponent<Monster>();
             monster.Role = role;
+            monster.IsPractice = practice;
             monster.WindUp = role == MonsterRole.Ogre ? 1.15f : role == MonsterRole.Runner ? 0.4f : 0.65f;
             monster.Build(role, color);
             monster._target = target;
@@ -320,11 +331,18 @@ namespace Archer
 
             var gm = GameManager.Instance;
             // Freeze movement and attacks outside active play (intermission,
-            // game over) so ended runs can't keep dealing damage.
-            if (gm != null && gm.State != GameState.Playing)
+            // game over) so ended runs can't keep dealing damage. Tutorial
+            // practice targets still move so the player can learn to lead them.
+            if (gm != null && gm.State != GameState.Playing && gm.State != GameState.Tutorial)
             {
                 if (_hitFlash > 0f) UpdateHitFlash();
                 return;
+            }
+
+            if (_slowTimer > 0f)
+            {
+                _slowTimer -= Time.deltaTime;
+                if (_slowTimer <= 0f) _slowFactor = 1f;
             }
 
             if (_stagger > 0f)
@@ -341,12 +359,13 @@ namespace Archer
             float distance = toTarget.magnitude;
 
             _attackRecovery = Mathf.Max(0f, _attackRecovery - Time.deltaTime);
+            float moveSpeed = Speed * _slowFactor;
             if (distance > _attackRange)
             {
                 _attackRecovery = 0f;
                 _winding = false;   // left range: cancel any wind-up
                 var dir = toTarget / Mathf.Max(distance, 0.0001f);
-                transform.position += dir * (Speed * Time.deltaTime);
+                transform.position += dir * (moveSpeed * Time.deltaTime);
                 transform.rotation = Quaternion.Slerp(transform.rotation,
                     Quaternion.LookRotation(dir, Vector3.up), 8f * Time.deltaTime);
             }
@@ -356,7 +375,11 @@ namespace Archer
                     transform.rotation = Quaternion.Slerp(transform.rotation,
                         Quaternion.LookRotation(toTarget.normalized, Vector3.up), 8f * Time.deltaTime);
 
-                if (_winding)
+                if (IsPractice)
+                {
+                    _winding = false;
+                }
+                else if (_winding)
                 {
                     // Telegraph: the enemy visibly winds up before the hit lands.
                     _windUpTimer -= Time.deltaTime;
@@ -382,7 +405,7 @@ namespace Archer
 
             _attackRing.enabled = _winding;
             if(_winding) _attackRing.widthMultiplier = Mathf.Lerp(0.04f,0.12f,WindupProgress);
-            _walkPhase += Time.deltaTime * Speed * 5f;
+            _walkPhase += Time.deltaTime * moveSpeed * 5f;
             float stride = distance > _attackRange ? Mathf.Sin(_walkPhase) * 24f : 0f;
             _leftLeg.localRotation = Quaternion.Euler(stride,0,0);
             _rightLeg.localRotation = Quaternion.Euler(-stride,0,0);
@@ -390,7 +413,7 @@ namespace Archer
 
             if (_motion != null && _motion.enabled)
             {
-                _motion.Sample(distance > _attackRange, Speed, _winding, WindupProgress,
+                _motion.Sample(distance > _attackRange, moveSpeed, _winding, WindupProgress,
                     _attackRecovery > 0f ? Mathf.Max(0.0001f, 1f - _attackRecovery / RecoveryDuration) : 0f);
             }
             else if (_meshModelRoot != null)
@@ -466,19 +489,33 @@ namespace Archer
                 _healthBar.rotation = Quaternion.LookRotation(_healthBar.position - _camera.position, Vector3.up);
         }
 
+        /// <summary>A slowing shot reduces movement speed for a while; re-applying refreshes it.</summary>
+        public void ApplySlow(float factor, float duration)
+        {
+            if (factor <= 0f || factor >= 1f || duration <= 0f) return;
+            _slowFactor = Mathf.Min(_slowFactor, factor);
+            _slowTimer = Mathf.Max(_slowTimer, duration);
+        }
+
         public void TakeDamage(float amount, bool precision = false)
         {
-            if (Health <= 0f || amount <= 0f || GameManager.Instance == null || GameManager.Instance.State != GameState.Playing) return;
+            if (Health <= 0f || amount <= 0f || GameManager.Instance == null
+                || (GameManager.Instance.State != GameState.Playing && GameManager.Instance.State != GameState.Tutorial)) return;
             Health -= amount;
             _hitFlash = 1f;
             _stagger = Role == MonsterRole.Ogre ? 0.08f : 0.18f;
             if (precision)
             {
+                // A headshot is the brute's interruption window: the swing stops.
+                bool interrupted = _winding;
                 _winding = false;
                 _attackRecovery = 0f;
                 _attackRing.enabled = false;
                 _attackTimer = 0.4f;
                 _weapon.localRotation = Quaternion.Euler(12f,0,-12f);
+                if (interrupted) GameFeedback.Instance?.Notify(
+                    GameLanguage.Text("INTERRUPTED", "공격 저지"),
+                    GameLanguage.Text("The swing is broken", "공격을 끊었습니다"), 0.9f);
             }
 
             if (_healthFill != null)
@@ -489,7 +526,7 @@ namespace Archer
                 _healthFill.localPosition = new Vector3(-(1f - ratio) * 0.5f, 0f, -0.02f);
             }
 
-            if (Health <= 0f) Die();
+            if (Health <= 0f) { DiedFromHeadshot = precision; Die(); }
         }
 
         void Die()
