@@ -42,6 +42,9 @@ namespace Archer
         Transform _healthBar;
         Transform _healthFill;
         Transform _camera;
+        float _headBottomLocal;
+        float _headTopLocal;
+        bool _headInModelSpace;
         Transform _leftLeg, _rightLeg, _weapon;
         Transform _meshModelRoot;
         GoblinMotion _motion;
@@ -116,9 +119,12 @@ namespace Archer
                 bodyCollider.height = 0.9f;
                 bodyCollider.center = new Vector3(0f, 0f, 0f);
 
+                // Keep the head box on the actual head: a larger sphere floats
+                // above the silhouette and turns near-misses overhead into free
+                // headshots at close range.
                 var headSphere = visual.AddComponent<SphereCollider>();
-                headSphere.radius = 0.25f;
-                headSphere.center = new Vector3(0f, 0.42f, 0.05f);
+                headSphere.radius = 0.11f;
+                headSphere.center = new Vector3(0f, 0.35f, 0.05f);
 
                 _renderers = visual.GetComponentsInChildren<Renderer>();
 
@@ -178,9 +184,20 @@ namespace Archer
             if (role == MonsterRole.Runner)
             {
                 // Red scarf — the runner's warm accent against the cool forest.
-                var scarfMat = Prim.Material(new Color(0.80f, 0.22f, 0.20f), 0.2f);
-                Prim.Create(PrimitiveType.Cube, "Scarf", transform, new Vector3(0f, 1.5f * s, 0.16f * s),
-                    new Vector3(0.66f * s, 0.22f * s, 0.5f * s), scarfMat, false);
+                // Keep it wrapped at the neck and slightly askew: a straight red
+                // bar at head height reads as a second health bar.
+                var scarfMat = Prim.Material(new Color(0.74f, 0.19f, 0.17f), 0.2f);
+                var collar = Prim.Create(PrimitiveType.Cube, "Scarf", transform,
+                    new Vector3(0f, 1.2f * s, 0.12f * s),
+                    new Vector3(0.58f * s, 0.12f * s, 0.44f * s), scarfMat, false);
+                collar.transform.localRotation = Quaternion.Euler(0f, 0f, 7f);
+                Prim.Create(PrimitiveType.Cube, "Scarf knot", transform,
+                    new Vector3(-0.24f * s, 1.11f * s, 0.18f * s),
+                    new Vector3(0.13f * s, 0.15f * s, 0.13f * s), scarfMat, false);
+                var tail = Prim.Create(PrimitiveType.Cube, "Scarf tail", transform,
+                    new Vector3(0.22f * s, 0.93f * s, -0.13f * s),
+                    new Vector3(0.15f * s, 0.34f * s, 0.1f * s), scarfMat, false);
+                tail.transform.localRotation = Quaternion.Euler(-12f, 0f, 9f);
             }
 
             if (role == MonsterRole.Shield)
@@ -209,6 +226,7 @@ namespace Archer
             rb.isKinematic = true;
             rb.useGravity = false;
 
+            MeasureHeadHitbox();
             BuildHealthBar(2.5f * s);
             var ring = new GameObject("Attack warning"); ring.transform.SetParent(transform,false);
             ring.transform.localPosition = new Vector3(0,0.06f,0);
@@ -235,6 +253,55 @@ namespace Archer
             var fill = Prim.Create(PrimitiveType.Cube, "Fill", barRoot.transform, new Vector3(0f, 0f, -0.02f),
                 new Vector3(1.0f, 0.12f, 0.02f), Prim.Material(new Color(0.85f, 0.2f, 0.2f)), false);
             _healthFill = fill.transform;
+        }
+
+        /// <summary>
+        /// Finds the head band of the built silhouette so arrows can award
+        /// headshot damage without relying on collider names. The imported
+        /// goblin keeps its colliders on a single shared object, so a contact
+        /// point test is the reliable option.
+        /// </summary>
+        void MeasureHeadHitbox()
+        {
+            var source = _meshModelRoot != null
+                ? _meshModelRoot.GetComponentsInChildren<Renderer>()
+                : _renderers;
+            if (source == null || source.Length == 0)
+            {
+                _headInModelSpace = false;
+                _headBottomLocal = 1.5f;
+                _headTopLocal = 1.9f;
+                return;
+            }
+
+            bool hasBounds = false;
+            Bounds bounds = default;
+            foreach (var r in source)
+            {
+                if (r == null || !r.enabled) continue;
+                if (!hasBounds) { bounds = r.bounds; hasBounds = true; }
+                else bounds.Encapsulate(r.bounds);
+            }
+            if (!hasBounds) { _headInModelSpace = false; _headBottomLocal = 1.5f; _headTopLocal = 1.9f; return; }
+
+            // The head sits in the top ~22% of every role's silhouette. Cap the
+            // band at the silhouette itself so shots sailing overhead do not count.
+            float headBottomWorld = bounds.max.y - bounds.size.y * 0.22f;
+            float headTopWorld = bounds.max.y;
+            Transform space = _meshModelRoot != null ? _meshModelRoot : transform;
+            _headInModelSpace = _meshModelRoot != null;
+            float scaleY = Mathf.Max(0.0001f, Mathf.Abs(space.lossyScale.y));
+            _headBottomLocal = (headBottomWorld - space.position.y) / scaleY;
+            _headTopLocal = (headTopWorld - space.position.y) / scaleY;
+        }
+
+        /// <summary>True when a hit point lands on the head band of this monster.</summary>
+        public bool IsHeadshot(Vector3 worldPoint)
+        {
+            Transform space = _headInModelSpace && _meshModelRoot != null ? _meshModelRoot : transform;
+            if (space == null) space = transform;
+            float y = space.InverseTransformPoint(worldPoint).y;
+            return y >= _headBottomLocal && y <= _headTopLocal;
         }
 
         void Update()

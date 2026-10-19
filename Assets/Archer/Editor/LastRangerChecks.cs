@@ -93,10 +93,12 @@ namespace Archer.EditorTools
             Check(falling.GetComponent<Rigidbody>().linearVelocity.y<-2 && falling.transform.forward.y<0,"Arrow points downward as it falls");
             Check(falling.GetComponent<TrailRenderer>()!=null,"Fired arrow has a short flight trail");
             UnityEngine.Object.Destroy(falling.gameObject); UnityEngine.Object.Destroy(gravityMaterial);
-            _target=Monster.Create(gm.MonsterParent,new Vector3(0,0,10),gm.ArcherTarget,MonsterRole.Raider,120,0,0,1,new Color(0.5f,0.7f,0.3f));
+            _target=Monster.Create(gm.MonsterParent,new Vector3(0,0,3),gm.ArcherTarget,MonsterRole.Raider,120,0,0,1,new Color(0.5f,0.7f,0.3f));
             yield return null;
-            var head=_target.transform.Find("Head");
-            Vector2 point=Camera.main.WorldToScreenPoint(head.position + Vector3.up * 1.3f);
+            Transform head=null;
+            foreach(var part in _target.GetComponentsInChildren<Transform>())
+                if(part.name=="Head") { head=part; break; }
+            Vector2 point=Camera.main.WorldToScreenPoint((head!=null?head.position:_target.transform.position) + Vector3.up * 0.3f);
             MouseEvent(point,true); yield return 0.2f;
             Check(archer.IsAiming,"Fresh pointer press draws bow");
             Check(archer.HasPrediction,"Trajectory predicts an impact");

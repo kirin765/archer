@@ -118,6 +118,13 @@ InitTestScene*.unity*
 
 # Local agent / tooling config
 /.codex/
+/.playwright-mcp/
 /opencode.json
 /plan.md
 /docs/
+
+# Apps in Toss SDK — deployment credentials (secret) and generated build output
+/Assets/AppsInToss/Editor/AITCredentials.asset
+/Assets/AppsInToss/Editor/AITCredentials.asset.meta
+/ait-build/
+/webgl/

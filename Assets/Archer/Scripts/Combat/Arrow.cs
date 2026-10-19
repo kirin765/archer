@@ -10,6 +10,9 @@ namespace Archer
     {
         public float Damage = 25f;
 
+        [Tooltip("Damage multiplier when the arrow lands on a monster's head.")]
+        public float HeadshotMultiplier = 1.75f;
+
         Rigidbody _rb;
         Material _headMaterial, _featherMaterial, _trailMaterial;
         TrailRenderer _trail;
@@ -123,10 +126,11 @@ namespace Archer
             if (monster != null)
             {
                 if (monster.IsDead) { Expire(); return; }
-                bool headshot = collision.collider.name == "Head";
-                float damage = Damage * (headshot ? 1.75f : 1f);
+                Vector3 point = collision.GetContact(0).point;
+                bool headshot = monster.IsHeadshot(point);
+                float damage = Damage * (headshot ? HeadshotMultiplier : 1f);
                 GameManager.Instance?.RegisterHit(headshot);
-                GameFeedback.Instance?.Hit(collision.GetContact(0).point, damage, headshot, false);
+                GameFeedback.Instance?.Hit(point, damage, headshot, false);
                 monster.TakeDamage(damage, headshot);
                 Expire(monster.transform);
                 return;
