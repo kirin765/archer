@@ -112,3 +112,12 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# AI Toolkit generated assets (large binaries, machine-generated)
+/GeneratedAssets/
+
+# Local agent / tooling config
+/.codex/
+/opencode.json
+/plan.md
+/docs/
