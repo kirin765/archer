@@ -31,6 +31,7 @@ namespace Archer
         Font _font;
         GameState _lastState = (GameState)(-1);
         int _lastRaid = -1, _lastOffers = -1;
+        float _nextTextRefresh;
         Rect _lastSafe;
 
         void Awake()
@@ -243,25 +244,30 @@ namespace Archer
             bool tutorial = gm.State == GameState.Tutorial;
             _combat.SetActive(playing || tutorial);
             _overlay.SetActive(!playing && !tutorial);
-            _hp.text = GameLanguage.Text($"{Mathf.CeilToInt(gm.Health)}/{Mathf.CeilToInt(gm.MaxHealth)} HP", $"체력 {Mathf.CeilToInt(gm.Health)}/{Mathf.CeilToInt(gm.MaxHealth)}");
             Fill(_healthFill, gm.Health / Mathf.Max(1, gm.MaxHealth));
-            _raid.text = tutorial
-                ? GameLanguage.Text("PRACTICE", "연습")
-                : GameLanguage.Text($"RAID {gm.RaidNumber}/{GameManager.TotalRaids}", $"습격 {gm.RaidNumber}/{GameManager.TotalRaids}");
-            _enemies.text = tutorial
-                ? GameLanguage.Text("free arrows", "화살 무제한")
-                : GameLanguage.Text($"{gm.MonstersRemaining} enemies", $"남은 적 {gm.MonstersRemaining}");
             _score.gameObject.SetActive(!tutorial);
-            _score.text = GameLanguage.Text($"{gm.Score} PTS · ×{gm.ScoreMultiplier} · {gm.HitStreak} HITS", $"{gm.Score}점 · ×{gm.ScoreMultiplier} · {gm.HitStreak}연속");
             _bossPanel.SetActive(gm.Boss != null && !gm.Boss.IsDead);
-            if (gm.Boss != null)
+            if (gm.Boss != null) Fill(_bossFill, gm.Boss.Health / gm.Boss.MaxHealth);
+            // Text formatting allocates; refresh it at 10 Hz while the bars,
+            // quiver and reticle keep updating every frame.
+            bool refreshText = Time.unscaledTime >= _nextTextRefresh;
+            if (refreshText)
             {
-                _bossLabel.text = gm.Boss.IsWinding
-                    ? GameLanguage.Text($"ATTACK IN {gm.Boss.WindupRemaining:0.0}s · HEADSHOT TO INTERRUPT", $"공격 {gm.Boss.WindupRemaining:0.0}초 전 · 머리를 맞혀 저지")
-                    : GameLanguage.Text("THE BRUTE", "오우거");
-                Fill(_bossFill, gm.Boss.Health / gm.Boss.MaxHealth);
+                _nextTextRefresh = Time.unscaledTime + 0.1f;
+                _hp.text = GameLanguage.Text($"{Mathf.CeilToInt(gm.Health)}/{Mathf.CeilToInt(gm.MaxHealth)} HP", $"체력 {Mathf.CeilToInt(gm.Health)}/{Mathf.CeilToInt(gm.MaxHealth)}");
+                _raid.text = tutorial
+                    ? GameLanguage.Text("PRACTICE", "연습")
+                    : GameLanguage.Text($"RAID {gm.RaidNumber}/{GameManager.TotalRaids}", $"습격 {gm.RaidNumber}/{GameManager.TotalRaids}");
+                _enemies.text = tutorial
+                    ? GameLanguage.Text("free arrows", "화살 무제한")
+                    : GameLanguage.Text($"{gm.MonstersRemaining} enemies", $"남은 적 {gm.MonstersRemaining}");
+                _score.text = GameLanguage.Text($"{gm.Score} PTS · ×{gm.ScoreMultiplier} · {gm.HitStreak} HITS", $"{gm.Score}점 · ×{gm.ScoreMultiplier} · {gm.HitStreak}연속");
+                if (gm.Boss != null)
+                    _bossLabel.text = gm.Boss.IsWinding
+                        ? GameLanguage.Text($"ATTACK IN {gm.Boss.WindupRemaining:0.0}s · HEADSHOT TO INTERRUPT", $"공격 {gm.Boss.WindupRemaining:0.0}초 전 · 머리를 맞혀 저지")
+                        : GameLanguage.Text("THE BRUTE", "오우거");
+                _ammo.text = gm.Arrows == 0 ? GameLanguage.Text("EMPTY · RECOVERING", "화살 보충 중") : GameLanguage.Text($"QUIVER  {gm.Arrows} / {gm.MaxArrows}", $"화살 {gm.Arrows} / {gm.MaxArrows}");
             }
-            _ammo.text = gm.Arrows == 0 ? GameLanguage.Text("EMPTY · RECOVERING", "화살 보충 중") : GameLanguage.Text($"QUIVER  {gm.Arrows} / {gm.MaxArrows}", $"화살 {gm.Arrows} / {gm.MaxArrows}");
             int shown = Mathf.Min(gm.MaxArrows, _quiver.Length);
             for (int i=0; i<_quiver.Length; i++)
             {
@@ -273,13 +279,14 @@ namespace Archer
             _charge.SetActive(archer.IsAiming); _drawLabel.gameObject.SetActive(archer.IsAiming);
             _cancel.SetActive(archer.IsAiming);
             Fill(_chargeFill, archer.Charge01);
-            _drawLabel.text = archer.Charge01 >= 0.99f ? GameLanguage.Text("FULL DRAW", "최대 장력") : GameLanguage.Text($"DRAW  {Mathf.RoundToInt(archer.Charge01*100)}%", $"장력 {Mathf.RoundToInt(archer.Charge01*100)}%");
+            if (refreshText)
+                _drawLabel.text = archer.Charge01 >= 0.99f ? GameLanguage.Text("FULL DRAW", "최대 장력") : GameLanguage.Text($"DRAW  {Mathf.RoundToInt(archer.Charge01*100)}%", $"장력 {Mathf.RoundToInt(archer.Charge01*100)}%");
             _hint.gameObject.SetActive(!archer.IsAiming && playing && gm.RaidNumber <= 2);
             var tut = tutorial ? gm.Tutorial : null;
             bool hasTut = tut != null && tut.Active;
             _objective.gameObject.SetActive(tutorial && hasTut);
             _objectiveSub.gameObject.SetActive(tutorial && hasTut);
-            if (tutorial && hasTut)
+            if (tutorial && hasTut && refreshText)
             {
                 string progress = tut.HitsNeeded > 1 ? $"  {tut.HitsThisStep}/{tut.HitsNeeded}" : "";
                 _objective.text = tut.ObjectiveTitle() + progress;
@@ -313,14 +320,17 @@ namespace Archer
                 _numbers[i].gameObject.SetActive(screen.z > 0);
             }
             bool toast = feedback != null && Time.unscaledTime < feedback.MessageUntil;
-            _toast.text = toast ? feedback.Message : "";
-            _toastDetail.text = toast ? feedback.Detail : "";
             _hurt.color = new Color(0.75f, 0.12f, 0.08f, feedback == null ? 0f : Mathf.Clamp01((feedback.HurtUntil-Time.unscaledTime)/0.3f)*0.2f);
-            _soundLabel.text = PlayerPrefs.GetInt("LastRanger.Sound", 1) == 1 ? GameLanguage.Text("Sound: On", "소리: 켜짐") : GameLanguage.Text("Sound: Off", "소리: 꺼짐");
-            _guideLabel.text = archer.ShowAimGuide ? GameLanguage.Text("Guide: On", "조준선: 켜짐") : GameLanguage.Text("Guide: Off", "조준선: 꺼짐");
-            _languageLabel.text = GameLanguage.Text("Language: English", "언어: 한국어");
-            _hint.text = GameLanguage.Text("Hold · Aim · Release", "당기고 · 조준하고 · 놓기");
-            _cancel.GetComponentInChildren<Text>().text = GameLanguage.Text("Cancel", "취소");
+            if (refreshText)
+            {
+                _toast.text = toast ? feedback.Message : "";
+                _toastDetail.text = toast ? feedback.Detail : "";
+                _soundLabel.text = PlayerPrefs.GetInt("LastRanger.Sound", 1) == 1 ? GameLanguage.Text("Sound: On", "소리: 켜짐") : GameLanguage.Text("Sound: Off", "소리: 꺼짐");
+                _guideLabel.text = archer.ShowAimGuide ? GameLanguage.Text("Guide: On", "조준선: 켜짐") : GameLanguage.Text("Guide: Off", "조준선: 꺼짐");
+                _languageLabel.text = GameLanguage.Text("Language: English", "언어: 한국어");
+                _hint.text = GameLanguage.Text("Hold · Aim · Release", "당기고 · 조준하고 · 놓기");
+                _cancel.GetComponentInChildren<Text>().text = GameLanguage.Text("Cancel", "취소");
+            }
             if (_lastKorean != GameLanguage.Korean || _lastState != gm.State || _lastRaid != gm.RaidNumber || _lastOffers != gm.Offers.Count)
             {
                 _lastKorean=GameLanguage.Korean; _lastState=gm.State; _lastRaid=gm.RaidNumber; _lastOffers=gm.Offers.Count;

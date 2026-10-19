@@ -120,7 +120,10 @@ namespace Archer
                 _ => 1f
             };
 
-            var visualPrefab = Resources.Load<GameObject>("Prefabs/Goblin_Visual");
+            // Prefer the decimated rig: the source goblin is ~1.4M triangles,
+            // which is unusable on mobile when several are on screen.
+            var visualPrefab = Resources.Load<GameObject>("Prefabs/Goblin_Visual_Low");
+            if (visualPrefab == null) visualPrefab = Resources.Load<GameObject>("Prefabs/Goblin_Visual");
             if (visualPrefab != null)
             {
                 var visual = Instantiate(visualPrefab, transform);
@@ -491,6 +494,8 @@ namespace Archer
             UpdateTint();
         }
 
+        MaterialPropertyBlock _tintBlock;
+
         void UpdateTint()
         {
             Color c = _baseColor;
@@ -505,14 +510,14 @@ namespace Archer
                 c = Color.Lerp(c, Color.white, Mathf.Clamp01(_hitFlash));
             }
 
-            var propBlock = new MaterialPropertyBlock();
-            propBlock.SetColor("_BaseColor", c);
-            propBlock.SetColor("_Color", c);
+            if (_tintBlock == null) _tintBlock = new MaterialPropertyBlock();
+            _tintBlock.SetColor("_BaseColor", c);
+            _tintBlock.SetColor("_Color", c);
             foreach (var r in _renderers)
             {
                 if (r != null)
                 {
-                    r.SetPropertyBlock(propBlock);
+                    r.SetPropertyBlock(_tintBlock);
                 }
             }
         }
@@ -523,14 +528,14 @@ namespace Archer
             _hitFlash -= Time.deltaTime * 4f;
             var c = Color.Lerp(_baseColor, Color.white, Mathf.Clamp01(_hitFlash));
 
-            var propBlock = new MaterialPropertyBlock();
-            propBlock.SetColor("_BaseColor", c);
-            propBlock.SetColor("_Color", c);
+            if (_tintBlock == null) _tintBlock = new MaterialPropertyBlock();
+            _tintBlock.SetColor("_BaseColor", c);
+            _tintBlock.SetColor("_Color", c);
             foreach (var r in _renderers)
             {
                 if (r != null)
                 {
-                    r.SetPropertyBlock(propBlock);
+                    r.SetPropertyBlock(_tintBlock);
                 }
             }
         }

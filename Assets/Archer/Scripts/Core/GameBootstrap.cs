@@ -49,6 +49,11 @@ namespace Archer
 
         void Awake()
         {
+            // Unity's mobile default is 30 fps. The display here is 60 Hz, and
+            // uncapping removes the single largest source of "slowness".
+            Application.targetFrameRate = 60;
+            QualitySettings.vSyncCount = 0;
+
             _world = new GameObject("World").transform;
 
             BuildGround();
@@ -119,6 +124,9 @@ namespace Archer
                     new Vector3(0.34f, 2.9f, 0.34f), woodMat, false);
             Prim.Create(PrimitiveType.Cube, "GateLintel", gate, new Vector3(0f, 5.8f, 0f),
                 new Vector3(gw * 2f + 0.5f, 0.36f, 0.36f), darkWoodMat, false);
+
+            // The fence, posts and lantern frames are static: batch them once.
+            StaticBatchingUtility.Combine(gate.gameObject);
         }
 
         void BuildLantern(Transform parent, Vector3 localPos)

@@ -5,27 +5,34 @@ namespace Archer
     /// <summary>Authored, repeatable low-poly scenery, kept outside the shooting lane.</summary>
     public static class ForestScene
     {
+        // One unit cone per side count, reused by every tree tier. Building a
+        // unique mesh per cone wasted memory and defeated batching.
+        static readonly System.Collections.Generic.Dictionary<int, Mesh> ConeMeshes = new();
+
         public static GameObject Cone(string name, Transform parent, Vector3 position, Vector3 scale, Material material, int sides = 7)
         {
-            var go = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer), typeof(GeneratedMesh));
+            var go = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
             go.transform.SetParent(parent, false); go.transform.localPosition = position; go.transform.localScale = scale;
-            var vertices = new Vector3[sides * 6];
-            var triangles = new int[vertices.Length];
-            for (int i = 0; i < sides; i++)
+            if (!ConeMeshes.TryGetValue(sides, out var mesh))
             {
-                float a = i * Mathf.PI * 2f / sides, b = (i+1)*Mathf.PI*2f/sides;
-                int v=i*6;
-                vertices[v] = new Vector3(Mathf.Cos(a)*0.5f, 0, Mathf.Sin(a)*0.5f);
-                vertices[v+1] = new Vector3(0,1,0);
-                vertices[v+2] = new Vector3(Mathf.Cos(b)*0.5f, 0, Mathf.Sin(b)*0.5f);
-                vertices[v+3] = Vector3.zero; vertices[v+4] = vertices[v]; vertices[v+5] = vertices[v+2];
-                for(int j=0;j<6;j++) triangles[v+j]=v+j;
+                var vertices = new Vector3[sides * 6];
+                var triangles = new int[vertices.Length];
+                for (int i = 0; i < sides; i++)
+                {
+                    float a = i * Mathf.PI * 2f / sides, b = (i+1)*Mathf.PI*2f/sides;
+                    int v=i*6;
+                    vertices[v] = new Vector3(Mathf.Cos(a)*0.5f, 0, Mathf.Sin(a)*0.5f);
+                    vertices[v+1] = new Vector3(0,1,0);
+                    vertices[v+2] = new Vector3(Mathf.Cos(b)*0.5f, 0, Mathf.Sin(b)*0.5f);
+                    vertices[v+3] = Vector3.zero; vertices[v+4] = vertices[v]; vertices[v+5] = vertices[v+2];
+                    for(int j=0;j<6;j++) triangles[v+j]=v+j;
+                }
+                mesh = new Mesh { name = name+" mesh", vertices = vertices, triangles = triangles };
+                mesh.RecalculateNormals(); mesh.RecalculateBounds();
+                ConeMeshes[sides] = mesh;
             }
-            var mesh = new Mesh { name = name+" mesh", vertices = vertices, triangles = triangles };
-            mesh.RecalculateNormals(); mesh.RecalculateBounds();
             go.GetComponent<MeshFilter>().sharedMesh = mesh;
             go.GetComponent<MeshRenderer>().sharedMaterial = material;
-            go.GetComponent<GeneratedMesh>().Mesh = mesh;
             return go;
         }
 
@@ -58,12 +65,9 @@ namespace Archer
                 for(int i=0;i<5;i++)
                     Cone("Distant ridge",root,new Vector3(side*(12+i*9),-1,100+i*8),new Vector3(35,Next(15,30),35),leaves[0],5);
             }
-        }
-    }
 
-    public class GeneratedMesh : MonoBehaviour
-    {
-        public Mesh Mesh;
-        void OnDestroy() { if(Mesh != null) Destroy(Mesh); }
+            // Collapse ~320 decorative renderers into one batch per material.
+            StaticBatchingUtility.Combine(root.gameObject);
+        }
     }
 }

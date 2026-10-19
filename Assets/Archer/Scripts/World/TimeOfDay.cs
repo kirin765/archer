@@ -22,6 +22,7 @@ namespace Archer
         Transform _moonDisc;
         float _time01;
         int _lastRaid;
+        float _appliedTime = -1f;
 
         public static TimeOfDay Instance { get; private set; }
         public float Time01 => _time01;
@@ -88,7 +89,13 @@ namespace Archer
             }
 
             _time01 = Mathf.Clamp(_time01, 0.65f, 0.79f); // Hold night; long defenses must not wrap back to dusk.
-            Apply();
+            // Render settings only need to change when the clock does; touching
+            // them every frame costs more than the slow day/night drift.
+            if (Mathf.Abs(_time01 - _appliedTime) > 0.00005f)
+            {
+                _appliedTime = _time01;
+                Apply();
+            }
         }
 
         void Apply()

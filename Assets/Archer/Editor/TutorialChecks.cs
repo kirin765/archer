@@ -154,12 +154,17 @@ namespace Archer.EditorTools
             UnityEngine.Object.Destroy(dummy.gameObject);
 
             // 8 · A piercing arrow survives the first hit and keeps flying.
+            // Clear any raid enemies that wandered into the lane so the check is
+            // not decided by an unrelated goblin intercepting the arrow.
+            foreach (var stray in UnityEngine.Object.FindObjectsByType<Monster>(FindObjectsSortMode.None))
+                if (!stray.IsPractice) UnityEngine.Object.Destroy(stray.gameObject);
+            yield return 0.1f;
             var target = Monster.Create(gm.MonsterParent, new Vector3(0f, 0f, 9f), gm.ArcherTarget,
                 MonsterRole.Raider, 500f, 0f, 0f, 10f, Color.green, practice: true);
             yield return 0.1f;
             var shaft = Prim.Material(Color.white);
             var piercer = Arrow.Create(gm.MonsterParent, new Vector3(0f, 0.9f, 0f),
-                new Vector3(0f, 0.35f, 30f), 10f, shaft, piercing: true, pierceCapacity: 1);
+                new Vector3(0f, 2f, 30f), 10f, shaft, piercing: true, pierceCapacity: 1);
             yield return 0.35f;
             Check(target.Health < 500f, "Piercing arrow damages the first enemy");
             Check(piercer != null && piercer.GetComponent<Collider>().enabled, "Piercing arrow keeps flying after a hit");

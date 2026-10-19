@@ -159,10 +159,19 @@ namespace Archer
                 {
                     _pierceRemaining--;
                     _pierced.Add(monster);
+                    // The goblin has a kinematic body; without this the solver
+                    // shoves the arrow backwards and it drops at the target's feet.
+                    var arrowCollider = GetComponent<Collider>();
+                    if (arrowCollider != null)
+                        foreach (var other in monster.GetComponentsInChildren<Collider>())
+                            Physics.IgnoreCollision(arrowCollider, other, true);
+                    if (_rb != null)
+                    {
+                        _rb.linearVelocity = _flightVelocity;
+                        _rb.angularVelocity = Vector3.zero;
+                    }
                     monster.TakeDamage(damage, headshot);
                     gm.NotifyMonsterHit(monster, headshot);
-                    // Restore the pre-impact flight so the deflection doesn't rob the shot.
-                    if (_rb != null) _rb.linearVelocity = _flightVelocity;
                     return;
                 }
 
