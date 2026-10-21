@@ -212,6 +212,12 @@ namespace Archer
                 headSphere.center = new Vector3(0f, 0.35f, 0.05f);
 
                 _renderers = visual.GetComponentsInChildren<Renderer>();
+                // The sword is steel, not role-coloured: keep it out of the
+                // tint/silhouette set so body tints never paint the blade.
+                var tintable = new List<Renderer>(_renderers.Length);
+                foreach (var renderer in _renderers)
+                    if (renderer != null && !renderer.name.Contains("Sword")) tintable.Add(renderer);
+                _renderers = tintable.ToArray();
                 CollectLodRenderers(visual.transform);
 
                 var dummyLeg = new GameObject("DummyLeg").transform;

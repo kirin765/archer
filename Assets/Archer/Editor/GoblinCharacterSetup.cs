@@ -21,6 +21,7 @@ namespace Archer.EditorTools
     public static class GoblinCharacterSetup
     {
         const string SourceModel = "Assets/Goblin_Character/Model/Goblin.fbx";
+        const string SourceSword = "Assets/Goblin_Character/Prefab/SWORD (1).prefab";
         const string SourceTexture = "Assets/Goblin_Character/Textures/COLORS.png";
         const string MaterialPath = "Assets/Archer/Materials/Goblin_Character.mat";
         const string RuntimePrefab = "Assets/Archer/Resources/Prefabs/Goblin_Visual.prefab";
@@ -72,6 +73,7 @@ namespace Archer.EditorTools
                     renderer.receiveShadows = true;
                 }
 
+                AttachSword(model, material);
                 Normalise(model);
 
                 PrefabUtility.SaveAsPrefabAsset(root, RuntimePrefab);
@@ -101,6 +103,54 @@ namespace Archer.EditorTools
         }
 
         static string ClipLength(AnimationClip clip) => clip != null ? clip.length.ToString("0.00") : "0";
+
+        /// <summary>
+        /// Puts the authored sword in the right hand. The sword mesh is authored
+        /// at 1/100 scale on purpose: the rig's bones carry a 100x import scale,
+        /// so a plain child of the hand bone comes out life-sized. Its material
+        /// shares the goblin's COLORS atlas, so one material covers both.
+        /// </summary>
+        static void AttachSword(GameObject model, Material material)
+        {
+            var source = AssetDatabase.LoadAssetAtPath<GameObject>(SourceSword);
+            if (source == null)
+            {
+                Debug.LogWarning("[GoblinCharacterSetup] Sword prefab missing: " + SourceSword);
+                return;
+            }
+            var hand = FindBone(model.transform, "DEF-hand.R")
+                ?? FindBone(model.transform, "hand.R")
+                ?? FindBone(model.transform, "R_Hand");
+            if (hand == null)
+            {
+                Debug.LogWarning("[GoblinCharacterSetup] Right hand bone not found; sword not attached.");
+                return;
+            }
+
+            var sword = Object.Instantiate(source, hand);
+            sword.name = "Sword";
+            sword.transform.localPosition = Vector3.zero;
+            sword.transform.localRotation = Quaternion.identity;
+            sword.transform.localScale = Vector3.one;
+            foreach (var renderer in sword.GetComponentsInChildren<Renderer>(true))
+            {
+                var materials = renderer.sharedMaterials;
+                for (int i = 0; i < materials.Length; i++) materials[i] = material;
+                renderer.sharedMaterials = materials;
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+                renderer.receiveShadows = true;
+            }
+        }
+
+        static Transform FindBone(Transform root, string name)
+        {
+            foreach (var t in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (t.name == name) return t;
+                if (string.Equals(t.name, name, System.StringComparison.OrdinalIgnoreCase)) return t;
+            }
+            return null;
+        }
 
         static void Normalise(GameObject model)
         {
