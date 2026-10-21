@@ -102,7 +102,7 @@ namespace Archer.EditorTools
             MouseEvent(point,true); yield return 0.2f;
             Check(archer.IsAiming,"Fresh pointer press draws bow");
             Check(archer.HasPrediction,"Trajectory predicts an impact");
-            yield return 0.85f;
+            yield return archer.ChargeTime + 0.1f;
             Check(archer.Charge01>0.99f,"Configured draw reaches full charge");
             MouseEvent(point,false); yield return 0.65f;
             Check(gm.ShotsFired==1,"Release fires exactly one shot");
@@ -114,9 +114,13 @@ namespace Archer.EditorTools
             // A shield should intercept the same physical projectile before the body.
             _target=Monster.Create(gm.MonsterParent,new Vector3(0,0,10),gm.ArcherTarget,MonsterRole.Shield,120,0,0,1,new Color(0.5f,0.7f,0.3f));
             yield return 0.5f; // Let the enemy finish facing the gate before targeting its shield.
-            Vector3 shield=_target.transform.Find("Shield").position;
+            Transform shieldPart=null;
+            foreach(var part in _target.GetComponentsInChildren<Transform>())
+                if(part.name=="Shield") { shieldPart=part; break; }
+            Check(shieldPart!=null,"Shield goblin builds its shield rig");
+            Vector3 shield=shieldPart.position;
             point=Camera.main.WorldToScreenPoint(shield + Vector3.up * 1.1f);
-            MouseEvent(point,true); yield return 1f;
+            MouseEvent(point,true); yield return archer.ChargeTime + 0.1f;
             MouseEvent(point,false); yield return 0.65f;
             Check(_target.Health==120,"Shield blocks a body shot");
             Check(gm.HitStreak==0 && gm.Score==75 && gm.ShotsHit==1,"Shield block breaks streak without awarding points");
@@ -162,6 +166,11 @@ namespace Archer.EditorTools
 
             for(int raid=1;raid<=GameManager.TotalRaids;raid++)
             {
+                if(raid==2) Check(gm.ObjectiveKind==RaidObjectiveKind.StopRunners && gm.ObjectiveTarget==2,"Raid two teaches stopping two runners");
+                if(raid==5) Check(gm.ObjectiveKind==RaidObjectiveKind.InterruptBrute && gm.ObjectiveTarget==2,"Raid five finale requires two brute interruptions");
+                if(raid==8) Check(gm.ObjectiveKind==RaidObjectiveKind.StopRunners && gm.ObjectiveTarget==5,"Raid eight requires stopping every runner");
+                if(raid==9) Check(gm.ObjectiveKind==RaidObjectiveKind.InterruptBrute && gm.ObjectiveTarget==1,"Raid nine rehearses the brute interrupt");
+                if(raid==10) Check(gm.ObjectiveKind==RaidObjectiveKind.InterruptBrute && gm.ObjectiveTarget==2,"Raid ten combines the brute interrupt finale");
                 // Kill each actually spawned enemy; queue counts must prevent an early clear.
                 double deadline=EditorApplication.timeSinceStartup+8;
                 while(gm.State==GameState.Playing && EditorApplication.timeSinceStartup<deadline)
@@ -170,6 +179,8 @@ namespace Archer.EditorTools
                     yield return 0.04f;
                 }
                 Check(gm.RaidsCleared==raid,"Raid "+raid+" clears exactly once after every queued enemy");
+                if(raid==2 || raid==8) Check(gm.ObjectiveComplete && gm.ObjectivesCompleted>0,"Stopping every runner completes the raid objective");
+                if(raid==5 || raid==9 || raid==10) Check(gm.ObjectiveFailed,"Killing the brute without enough interrupts fails the optional objective");
                 if(raid<GameManager.TotalRaids)
                 {
                     Check(gm.State==GameState.Intermission && gm.Offers.Count==2,"Cleared raid offers two supplies");
@@ -179,6 +190,10 @@ namespace Archer.EditorTools
                     float beforeCharge=archer.ChargeTime, beforeRecovery=gm.ArrowRegenInterval;
                     if(raid==1)
                     {
+                        double overlayDeadline=EditorApplication.timeSinceStartup+4;
+                        while(!Hud.Instance.OverlayVisible && EditorApplication.timeSinceStartup<overlayDeadline)
+                            yield return 0.05f;
+                        Check(Hud.Instance.OverlayVisible,"Intermission card appears after the clear beat");
                         point=ButtonCenter("Upgrade A");
                         MouseEvent(point,true); yield return 0.1f;
                         MouseEvent(point,false); yield return 0.1f;
@@ -194,8 +209,8 @@ namespace Archer.EditorTools
                 }
             }
             Check(gm.Score>0,"Completing raids awards score");
-            Check(gm.State==GameState.Victory && gm.RaidNumber==GameManager.TotalRaids,"Twentieth raid ends in Village Defended");
-            gm.StartRaid(); Check(gm.RaidNumber==GameManager.TotalRaids,"Victory cannot start an unintended twenty-first raid");
+            Check(gm.State==GameState.Victory && gm.RaidNumber==GameManager.TotalRaids,"Tenth raid ends in Chapter Two cleared");
+            gm.StartRaid(); Check(gm.RaidNumber==GameManager.TotalRaids,"Victory cannot start an unintended eleventh raid");
             int kills=gm.Kills;
             Check(!gm.TryConsumeArrow(),"Victory rejects shooting");
             gm.Restart(); yield return 0.1f;

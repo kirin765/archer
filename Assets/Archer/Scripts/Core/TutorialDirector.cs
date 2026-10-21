@@ -74,7 +74,7 @@ namespace Archer
                     if (HitsThisStep >= HitsNeeded) Advance();
                     else GameFeedback.Instance?.Notify(
                         GameLanguage.Text("GOOD HIT", "명중"),
-                        GameLanguage.Text("One more on the target", "한 번 더 맞히세요"), 1f);
+                        GameLanguage.Text("One more on the target", "표적을 한 번 더 맞히세요"), 1f);
                     break;
 
                 case Step.MovingTarget:
@@ -84,8 +84,8 @@ namespace Archer
                 case Step.ShieldedHead:
                     if (headshot) Advance();
                     else GameFeedback.Instance?.Notify(
-                        GameLanguage.Text("AIM HIGHER", "더 높이"),
-                        GameLanguage.Text("The shield covers the body — hit the head", "방패가 몸을 가립니다 · 머리를 노리세요"), 1.4f);
+                        GameLanguage.Text("AIM HIGHER", "더 높게 조준"),
+                        GameLanguage.Text("The shield covers the body — hit the head", "방패가 몸을 가리니 머리를 노리세요"), 1.4f);
                     break;
             }
         }
@@ -119,8 +119,8 @@ namespace Archer
             switch (reason)
             {
                 case MissReason.Short:
-                    GameFeedback.Instance?.Notify(GameLanguage.Text("FELL SHORT", "짧았습니다"),
-                        GameLanguage.Text("Draw longer — hold until the bar fills", "더 당기세요 · 장력 막대를 채우세요"), 1.4f);
+                    GameFeedback.Instance?.Notify(GameLanguage.Text("FELL SHORT", "짧게 떨어짐"),
+                        GameLanguage.Text("Draw longer — hold until the bar fills", "게이지가 가득 찰 때까지 더 당기세요"), 1.4f);
                     break;
                 case MissReason.Blocked:
                     GameFeedback.Instance?.Notify(GameLanguage.Text("SHIELD BLOCKED", "방패에 막혔습니다"),
@@ -221,16 +221,16 @@ namespace Archer
         public string ObjectiveTitle() => Current switch
         {
             Step.StillTarget => GameLanguage.Text($"PRACTICE {StepNumber}/{StepCount} · STILL TARGET", $"연습 {StepNumber}/{StepCount} · 고정 표적"),
-            Step.MovingTarget => GameLanguage.Text($"PRACTICE {StepNumber}/{StepCount} · THE RUNNER", $"연습 {StepNumber}/{StepCount} · 달리는 적"),
+            Step.MovingTarget => GameLanguage.Text($"PRACTICE {StepNumber}/{StepCount} · THE RUNNER", $"연습 {StepNumber}/{StepCount} · 질주병"),
             Step.ShieldedHead => GameLanguage.Text($"PRACTICE {StepNumber}/{StepCount} · THE SHIELD", $"연습 {StepNumber}/{StepCount} · 방패병"),
             _ => GameLanguage.Text("PRACTICE COMPLETE", "연습 완료")
         };
 
         public string ObjectiveHint() => Current switch
         {
-            Step.StillTarget => GameLanguage.Text("Hold to draw, then release.\nHit the target twice.", "길게 당긴 뒤 놓으세요.\n두 번 맞히면 됩니다."),
-            Step.MovingTarget => GameLanguage.Text("Aim ahead of the runner.", "달리는 적의 앞을 겨누세요."),
-            Step.ShieldedHead => GameLanguage.Text("The shield blocks the body.\nHit the head above it.", "방패가 몸을 가립니다.\n위쪽 머리를 맞히세요."),
+            Step.StillTarget => GameLanguage.Text("Hold to draw, then release.\nHit the target twice.", "활을 길게 당긴 뒤 놓으세요.\n표적을 두 번 맞히면 됩니다."),
+            Step.MovingTarget => GameLanguage.Text("Aim ahead of the runner.", "질주병의 앞을 겨누세요."),
+            Step.ShieldedHead => GameLanguage.Text("The shield blocks the body.\nHit the head above it.", "방패가 몸을 가립니다.\n방패 위 머리를 맞히세요."),
             _ => GameLanguage.Text("Now hold the path.", "이제 숲길을 지키세요.")
         };
     }

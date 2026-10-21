@@ -1,177 +1,231 @@
 using System.Collections.Generic;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 
 namespace Archer.EditorTools
 {
     /// <summary>
-    /// The imported goblin is ~1.4M triangles per instance, which is far beyond
-    /// what a mobile GPU can draw five times per frame. This builds a clustered
-    /// low-poly LOD from the same mesh, preserving bindposes and bone weights so
-    /// it can be swapped into the existing rig without touching the avatar,
-    /// animations or materials.
+    /// Builds the shippable goblin.
+    ///
+    /// The imported model is ~1.4M triangles; five of those on screen is far
+    /// beyond a mobile GPU, and the whole 55 MB source asset was being pulled
+    /// into the build through the Resources prefab even though the game never
+    /// drew it.
+    ///
+    /// This tool:
+    ///   - decimates the source with the quadric simplifier in
+    ///     <see cref="GoblinMeshSimplifier"/>, which keeps the UV layout, the
+    ///     normals and the bone weights (and adds tangents, so the normal map
+    ///     finally reaches the screen);
+    ///   - writes three levels of detail and wires them into a LODGroup, so a
+    ///     goblin costs what its on-screen size deserves;
+    ///   - rebuilds the runtime prefab so it references only the small meshes
+    ///     and the shared material, leaving the 55 MB source out of the build.
     /// </summary>
     public static class GoblinMeshOptimizer
     {
-        const string SourcePrefab = "Assets/Archer/Resources/Prefabs/Goblin_Visual.prefab";
-        const string ReducedMesh = "Assets/Archer/Models/Monsters/Goblin_LowPoly.asset";
-        const string ReducedPrefab = "Assets/Archer/Resources/Prefabs/Goblin_Visual_Low.prefab";
+        const string RigPrefabPath = "Assets/Archer/Models/Monsters/Goblin_Visual_Rig.prefab";
+        const string RuntimePrefabPath = "Assets/Archer/Resources/Prefabs/Goblin_Visual.prefab";
+        const string MeshFolder = "Assets/Archer/Models/Monsters/";
+        const string MaterialPath = "Assets/Archer/Materials/Goblin_Skin.mat";
+        const string TextureFolder = "Assets/Archer/Models/Monsters/Goblin_Raider_Assets/selected.fbm/";
+        const string LegacyMesh = "Assets/Archer/Models/Monsters/Goblin_LowPoly.asset";
+        const string LegacyPrefab = "Assets/Archer/Resources/Prefabs/Goblin_Visual_Low.prefab";
+
+        struct LodSpec
+        {
+            public string Name;
+            public int Triangles;
+        }
+
+        static readonly LodSpec[] Lods =
+        {
+            new LodSpec { Name = "Goblin_LOD0", Triangles = 30000 },
+            new LodSpec { Name = "Goblin_LOD1", Triangles = 11000 },
+            new LodSpec { Name = "Goblin_LOD2", Triangles = 3500 },
+        };
 
         [MenuItem("Archer/Optimize Goblin Mesh")]
         public static string Run()
         {
-            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(SourcePrefab);
-            if (prefab == null) return "ERROR: source prefab missing";
-            var source = prefab.GetComponentInChildren<SkinnedMeshRenderer>();
-            if (source == null || source.sharedMesh == null) return "ERROR: skinned mesh missing";
+            var rigPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(RigPrefabPath);
+            if (rigPrefab == null)
+                return "ERROR: rig prefab missing. Run 'Archer/Rebuild Goblin Animation Prefab' first.";
+            var sourceRenderer = rigPrefab.GetComponentInChildren<SkinnedMeshRenderer>();
+            if (sourceRenderer == null || sourceRenderer.sharedMesh == null)
+                return "ERROR: rig prefab has no skinned mesh";
+            var source = sourceRenderer.sharedMesh;
 
-            var original = source.sharedMesh;
-            var reduced = Decimate(original, 140);
+            var report = new StringBuilder();
+            report.AppendLine($"source: {source.vertexCount} verts / {source.triangles.Length / 3} tris / {source.bindposes.Length} bones");
 
-            AssetDatabase.DeleteAsset(ReducedMesh);
-            AssetDatabase.CreateAsset(reduced, ReducedMesh);
+            var meshes = new List<Mesh>();
+            foreach (var lod in Lods)
+            {
+                var mesh = GoblinMeshSimplifier.Simplify(source, GoblinMeshSimplifier.Settings.For(lod.Triangles));
+                var path = MeshFolder + lod.Name + ".asset";
+                AssetDatabase.DeleteAsset(path);
+                AssetDatabase.CreateAsset(mesh, path);
+                meshes.Add(mesh);
+                report.AppendLine($"{lod.Name}: {mesh.vertexCount} verts / {mesh.triangles.Length / 3} tris " +
+                                  $"(target {lod.Triangles}, tangents {mesh.tangents.Length}, bones {mesh.bindposes.Length})");
+            }
             AssetDatabase.SaveAssets();
 
-            // Clone the prefab so the avatar, bones, Animator, GoblinMotion and
-            // material references all stay intact; only the mesh changes.
-            var root = Object.Instantiate(prefab);
+            // Rebuild the runtime prefab from the rig so the avatar, bones,
+            // animator, GoblinMotion and the material all stay intact.
+            var root = Object.Instantiate(rigPrefab);
             try
             {
-                var smr = root.GetComponentInChildren<SkinnedMeshRenderer>();
-                smr.sharedMesh = reduced;
-                PrefabUtility.SaveAsPrefabAsset(root, ReducedPrefab);
+                var lod0 = root.GetComponentInChildren<SkinnedMeshRenderer>();
+                var bones = lod0.bones;
+                var rootBone = lod0.rootBone;
+                var material = BuildMaterial(report);
+                var parent = lod0.transform.parent;
+
+                lod0.name = "GoblinMesh_LOD0";
+                lod0.sharedMesh = meshes[0];
+                lod0.sharedMaterial = material;
+                Configure(lod0, meshes[0]);
+
+                var renderers = new List<SkinnedMeshRenderer> { lod0 };
+                for (int i = 1; i < meshes.Count; i++)
+                {
+                    var go = new GameObject("GoblinMesh_LOD" + i);
+                    go.transform.SetParent(parent, false);
+                    var smr = go.AddComponent<SkinnedMeshRenderer>();
+                    smr.sharedMesh = meshes[i];
+                    smr.sharedMaterial = material;
+                    smr.bones = bones;
+                    smr.rootBone = rootBone;
+                    Configure(smr, meshes[i]);
+                    // The enemy picks the level that matches its distance, so
+                    // only the closest one is drawn.
+                    smr.enabled = false;
+                    renderers.Add(smr);
+                }
+
+                PrefabUtility.SaveAsPrefabAsset(root, RuntimePrefabPath);
+                report.AppendLine($"runtime prefab: {RuntimePrefabPath} with {renderers.Count} LOD renderers");
             }
             finally { Object.DestroyImmediate(root); }
-            AssetDatabase.SaveAssets();
 
-            int before = original.triangles.Length / 3;
-            int after = reduced.triangles.Length / 3;
-            string msg = $"goblin {before} -> {after} tris ({after * 100f / Mathf.Max(1, before):0.0}%), verts {original.vertexCount} -> {reduced.vertexCount}";
+            // The clustered mesh and its prefab are superseded by the LOD set.
+            AssetDatabase.DeleteAsset(LegacyMesh);
+            AssetDatabase.DeleteAsset(LegacyPrefab);
+            AssetDatabase.SaveAssets();
+            TuneTextures(report);
+
+            string msg = report.ToString().TrimEnd();
             Debug.Log("[GoblinMeshOptimizer] " + msg);
             return msg;
         }
 
-        static Mesh Decimate(Mesh source, int resolution)
+        static void Configure(SkinnedMeshRenderer smr, Mesh mesh)
         {
-            var vertices = source.vertices;
-            var normals = source.normals;
-            var uv = source.uv;
-            var weights = source.boneWeights;
-            var triangles = source.triangles;
-            var bounds = source.bounds;
+            // Two bone influences per vertex: the decimator already pruned the
+            // weights, so the skinning cost halves without visible change.
+            smr.quality = SkinQuality.Bone2;
+            // The camera watches one lane; there is nothing to skin off screen.
+            smr.updateWhenOffscreen = false;
+            // The imported prefab shipped with stale bounds (0.29 units tall
+            // for an 0.86 unit character), which would cull the goblin away.
+            smr.localBounds = RendererBounds(smr, mesh);
+        }
 
-            float cell = Mathf.Max(bounds.size.x, Mathf.Max(bounds.size.y, bounds.size.z)) / Mathf.Max(8, resolution);
-            var lookup = new Dictionary<long, int>(vertices.Length);
-            var map = new int[vertices.Length];
-            var clusters = new List<Cluster>(vertices.Length / 8);
-
-            for (int i = 0; i < vertices.Length; i++)
+        /// <summary>
+        /// The mesh vertices live in the root bone's space, which is turned a
+        /// quarter turn against the renderer. Handing the renderer the mesh
+        /// bounds verbatim would cull the goblin on the wrong axis, so the box
+        /// is rebuilt in the renderer's own space.
+        /// </summary>
+        static Bounds RendererBounds(SkinnedMeshRenderer smr, Mesh mesh)
+        {
+            var matrix = smr.transform.worldToLocalMatrix * smr.rootBone.localToWorldMatrix;
+            var b = mesh.bounds;
+            var result = new Bounds();
+            bool first = true;
+            for (int i = 0; i < 8; i++)
             {
-                var v = vertices[i];
-                long x = (long)Mathf.Floor((v.x - bounds.min.x) / cell);
-                long y = (long)Mathf.Floor((v.y - bounds.min.y) / cell);
-                long z = (long)Mathf.Floor((v.z - bounds.min.z) / cell);
-                long key = (x * 73856093L) ^ (y * 19349663L) ^ (z * 83492791L);
-                if (!lookup.TryGetValue(key, out int index))
-                {
-                    index = clusters.Count;
-                    lookup[key] = index;
-                    clusters.Add(new Cluster
-                    {
-                        Position = Vector3.zero,
-                        Normal = Vector3.zero,
-                        Uv = i < uv.Length ? uv[i] : Vector2.zero
-                    });
-                }
-                map[i] = index;
-                var c = clusters[index];
-                c.Position += v;
-                if (i < normals.Length) c.Normal += normals[i];
-                c.Count++;
-                if (i < weights.Length)
-                {
-                    var w = weights[i];
-                    c.AddBone(w.boneIndex0, w.weight0);
-                    c.AddBone(w.boneIndex1, w.weight1);
-                    c.AddBone(w.boneIndex2, w.weight2);
-                    c.AddBone(w.boneIndex3, w.weight3);
-                }
+                var corner = new Vector3(
+                    (i & 1) == 0 ? b.min.x : b.max.x,
+                    (i & 2) == 0 ? b.min.y : b.max.y,
+                    (i & 4) == 0 ? b.min.z : b.max.z);
+                var p = matrix.MultiplyPoint3x4(corner);
+                if (first) { result = new Bounds(p, Vector3.zero); first = false; }
+                else result.Encapsulate(p);
             }
-
-            var reducedVerts = new Vector3[clusters.Count];
-            var reducedNormals = new Vector3[clusters.Count];
-            var reducedUv = new Vector2[clusters.Count];
-            var reducedWeights = new BoneWeight[clusters.Count];
-            for (int i = 0; i < clusters.Count; i++)
-            {
-                var c = clusters[i];
-                reducedVerts[i] = c.Position / Mathf.Max(1, c.Count);
-                reducedNormals[i] = c.Normal.sqrMagnitude > 0.0001f ? c.Normal.normalized : Vector3.up;
-                reducedUv[i] = c.Uv;
-                reducedWeights[i] = c.ToBoneWeight();
-            }
-
-            var reducedTris = new List<int>(triangles.Length / 3);
-            for (int i = 0; i + 2 < triangles.Length; i += 3)
-            {
-                int a = map[triangles[i]], b = map[triangles[i + 1]], c = map[triangles[i + 2]];
-                if (a == b || b == c || a == c) continue;
-                reducedTris.Add(a); reducedTris.Add(b); reducedTris.Add(c);
-            }
-
-            var result = new Mesh
-            {
-                name = source.name + " (low)",
-                indexFormat = reducedVerts.Length > 65535
-                    ? UnityEngine.Rendering.IndexFormat.UInt32
-                    : UnityEngine.Rendering.IndexFormat.UInt16
-            };
-            result.SetVertices(reducedVerts);
-            result.SetNormals(reducedNormals);
-            result.SetUVs(0, reducedUv);
-            result.boneWeights = reducedWeights;
-            result.bindposes = source.bindposes;
-            result.SetTriangles(reducedTris, 0, true);
-            result.RecalculateBounds();
+            // Leave room for the swing of the arms and the bob of the walk.
+            result.Expand(result.size.magnitude * 0.08f);
             return result;
         }
 
-        class Cluster
+        /// <summary>
+        /// Builds the runtime material.
+        ///
+        /// The imported material shipped as a sub-asset of the 55 MB source
+        /// model, so the runtime prefab kept the whole model alive in every
+        /// build even though only the decimated meshes were ever drawn. The
+        /// textures are separate project assets, so a small URP/Lit material
+        /// that points at them breaks the link.
+        /// </summary>
+        static Material BuildMaterial(StringBuilder report)
         {
-            public Vector3 Position, Normal;
-            public Vector2 Uv;
-            public int Count;
-            readonly Dictionary<int, float> Bones = new();
+            if (!AssetDatabase.IsValidFolder("Assets/Archer/Materials"))
+                AssetDatabase.CreateFolder("Assets/Archer", "Materials");
 
-            public void AddBone(int index, float weight)
+            var lit = Shader.Find("Universal Render Pipeline/Lit");
+            if (lit == null) lit = Shader.Find("Standard");
+            var copy = new Material(lit) { name = "Goblin_Skin" };
+
+            foreach (var guid in AssetDatabase.FindAssets("t:Texture2D", new[] { TextureFolder }))
             {
-                if (weight <= 0f) return;
-                Bones.TryGetValue(index, out float sum);
-                Bones[index] = sum + weight;
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+                if (texture == null) continue;
+                if (path.Contains("Normal")) copy.SetTexture("_BumpMap", texture);
+                else copy.SetTexture("_BaseMap", texture);
             }
+            // Skin reads better slightly damp than the imported 0.5 gloss.
+            if (copy.HasProperty("_Smoothness")) copy.SetFloat("_Smoothness", 0.34f);
+            if (copy.HasProperty("_Glossiness")) copy.SetFloat("_Glossiness", 0.34f);
+            if (copy.HasProperty("_Metallic")) copy.SetFloat("_Metallic", 0f);
+            if (copy.HasProperty("_BumpScale")) copy.SetFloat("_BumpScale", 1f);
+            if (copy.HasProperty("_BaseColor")) copy.SetColor("_BaseColor", Color.white);
+            // The decimated meshes carry their own tangents, so the normal map
+            // can finally be used.
+            copy.EnableKeyword("_NORMALMAP");
 
-            public BoneWeight ToBoneWeight()
+            AssetDatabase.DeleteAsset(MaterialPath);
+            AssetDatabase.CreateAsset(copy, MaterialPath);
+            var material = AssetDatabase.LoadAssetAtPath<Material>(MaterialPath);
+            report.AppendLine($"material: {MaterialPath} shader={material.shader?.name} " +
+                              $"base={material.GetTexture("_BaseMap")?.name} " +
+                              $"normal={material.GetTexture("_BumpMap")?.name}");
+            return material;
+        }
+
+        /// <summary>
+        /// The goblin is never more than a few hundred pixels tall, so 2048
+        /// textures were pure waste. Mipmaps also fix the shimmer the goblin
+        /// showed while walking at distance.
+        /// </summary>
+        static void TuneTextures(StringBuilder report)
+        {
+            foreach (var guid in AssetDatabase.FindAssets("t:Texture2D", new[] { TextureFolder }))
             {
-                // Keep the four heaviest influences, renormalized.
-                int i0 = -1, i1 = -1, i2 = -1, i3 = -1;
-                float w0 = 0, w1 = 0, w2 = 0, w3 = 0;
-                foreach (var pair in Bones)
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                var importer = AssetImporter.GetAtPath(path) as TextureImporter;
+                if (importer == null) continue;
+                bool changed = false;
+                if (!importer.mipmapEnabled) { importer.mipmapEnabled = true; changed = true; }
+                if (importer.maxTextureSize > 1024) { importer.maxTextureSize = 1024; changed = true; }
+                if (changed)
                 {
-                    float w = pair.Value;
-                    if (w > w0) { i3 = i2; w3 = w2; i2 = i1; w2 = w1; i1 = i0; w1 = w0; i0 = pair.Key; w0 = w; }
-                    else if (w > w1) { i3 = i2; w3 = w2; i2 = i1; w2 = w1; i1 = pair.Key; w1 = w; }
-                    else if (w > w2) { i3 = i2; w3 = w2; i2 = pair.Key; w2 = w; }
-                    else if (w > w3) { i3 = pair.Key; w3 = w; }
+                    importer.SaveAndReimport();
+                    report.AppendLine($"texture: {path} -> mipmaps on, max 1024");
                 }
-                float total = w0 + w1 + w2 + w3;
-                if (total <= 0f) return new BoneWeight { boneIndex0 = 0, weight0 = 1f };
-                return new BoneWeight
-                {
-                    boneIndex0 = Mathf.Max(0, i0), weight0 = w0 / total,
-                    boneIndex1 = Mathf.Max(0, i1), weight1 = w1 / total,
-                    boneIndex2 = Mathf.Max(0, i2), weight2 = w2 / total,
-                    boneIndex3 = Mathf.Max(0, i3), weight3 = w3 / total
-                };
             }
         }
     }

@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Archer
 {
-    public enum FeedbackSound { Shot, Hit, Block, Clear, Kill, EnemyWarning, PlayerHurt }
+    public enum FeedbackSound { Shot, Hit, Headshot, Block, Clear, Kill, Interrupt, EnemyWarning, PlayerHurt }
 
     /// <summary>Audio playback, ambient forest soundscape, dynamic combat music, and transient HUD feedback.</summary>
     public class GameFeedback : MonoBehaviour
@@ -15,6 +15,7 @@ namespace Archer
         public float HitUntil { get; private set; }
         public float HurtUntil { get; private set; }
         public bool Critical { get; private set; }
+        public bool Blocked { get; private set; }
         public Vector3 LastHitPosition { get; private set; }
         public event System.Action<Vector3, string, Color> Impact;
         public event System.Action Cleared;
@@ -29,6 +30,8 @@ namespace Archer
         AudioClip _musicClip;
         AudioClip _hurtClip;
         AudioClip _warningClip;
+        bool _soundEnabled = true;
+        float _musicVolume = 1f, _ambienceVolume = 1f, _effectsVolume = 1f;
 
         readonly Dictionary<FeedbackSound, AudioClip> _clips = new();
 
@@ -85,10 +88,21 @@ namespace Archer
             var hitClip = Resources.Load<AudioClip>("Audio/Arrow_Hit");
             _clips[FeedbackSound.Hit] = hitClip != null ? hitClip : Tone("Arrow impact", 420f, 100f, 0.12f, 0.2f);
 
+            // A headshot must not sound like another body hit. The bright,
+            // short metallic sweep cuts through the low body thump.
+            var headshotClip = Resources.Load<AudioClip>("Audio/Arrow_Headshot");
+            _clips[FeedbackSound.Headshot] = headshotClip != null
+                ? headshotClip
+                : Tone("Headshot", 1480f, 620f, 0.17f, 0.06f);
+
             var blockClip = Resources.Load<AudioClip>("Audio/Shield_Block");
             _clips[FeedbackSound.Block] = blockClip != null ? blockClip : Tone("Shield block", 760f, 310f, 0.16f, 0.4f);
 
             _clips[FeedbackSound.Kill] = Tone("Defeated", 520f, 210f, 0.22f, 0.12f);
+            var interruptClip = Resources.Load<AudioClip>("Audio/Brute_Interrupt");
+            _clips[FeedbackSound.Interrupt] = interruptClip != null
+                ? interruptClip
+                : Tone("Brute interrupt", 190f, 72f, 0.34f, 0.3f);
             _clips[FeedbackSound.Clear] = Tone("Raid clear", 390f, 780f, 0.55f, 0.02f);
 
             _warningClip = Resources.Load<AudioClip>("Audio/Enemy_Warning");
@@ -110,25 +124,37 @@ namespace Archer
                 _musicSource.clip = _musicClip;
                 _musicSource.Play();
             }
+
+            ApplySettings();
+        }
+
+        /// <summary>Re-read persisted audio and motion preferences after settings change.</summary>
+        public void ApplySettings()
+        {
+            _soundEnabled = GameSettings.SoundEnabled;
+            _musicVolume = GameSettings.MusicVolume;
+            _ambienceVolume = GameSettings.AmbienceVolume;
+            _effectsVolume = GameSettings.EffectsVolume;
         }
 
         void Update()
         {
             // Restrained music balance: music stays quiet enough that the bow and enemy warnings remain clear.
-            bool soundEnabled = PlayerPrefs.GetInt("LastRanger.Sound", 1) != 0;
             var gm = GameManager.Instance;
             bool isPlaying = gm != null && (gm.State == GameState.Playing || gm.State == GameState.Tutorial);
 
             if (_ambienceSource != null)
             {
-                float targetAmbience = soundEnabled ? 0.20f : 0f;
+                float targetAmbience = _soundEnabled ? 0.20f * _ambienceVolume : 0f;
                 _ambienceSource.volume = Mathf.MoveTowards(_ambienceSource.volume, targetAmbience, Time.unscaledDeltaTime * 0.5f);
             }
 
             if (_musicSource != null)
             {
                 // Music plays prominently during combat, and remains clearly audible during menus/intermissions.
-                float targetMusic = (soundEnabled && isPlaying) ? 0.45f : (soundEnabled ? 0.28f : 0f);
+                float targetMusic = _soundEnabled
+                    ? (isPlaying ? 0.45f : 0.28f) * _musicVolume
+                    : 0f;
                 _musicSource.volume = Mathf.MoveTowards(_musicSource.volume, targetMusic, Time.unscaledDeltaTime * 0.4f);
             }
         }
@@ -155,17 +181,17 @@ namespace Archer
         public void SetBowTension(float draw)
         {
             if (_tension == null) return;
-            bool audible = draw >= 0 && Time.timeScale > 0 && PlayerPrefs.GetInt("LastRanger.Sound", 1) != 0;
+            bool audible = draw >= 0 && Time.timeScale > 0 && _soundEnabled && _effectsVolume > 0f;
             if (!audible) { if (_tension.isPlaying) _tension.Stop(); return; }
             _tension.pitch = Mathf.Lerp(0.85f, 1.25f, draw);
-            _tension.volume = Mathf.Lerp(0.12f, 0.40f, draw);
+            _tension.volume = Mathf.Lerp(0.12f, 0.40f, draw) * _effectsVolume;
             if (!_tension.isPlaying) _tension.Play();
         }
 
         public void Play(FeedbackSound sound, float volumeScale = 1f)
         {
-            if (PlayerPrefs.GetInt("LastRanger.Sound", 1) != 0 && _clips.TryGetValue(sound, out var clip))
-                _source.PlayOneShot(clip, volumeScale);
+            if (_soundEnabled && _effectsVolume > 0f && _clips.TryGetValue(sound, out var clip))
+                _source.PlayOneShot(clip, volumeScale * _effectsVolume);
         }
 
         public void Notify(string title, string detail, float duration = 1.5f)
@@ -173,22 +199,63 @@ namespace Archer
             Message = title; Detail = detail; MessageUntil = Time.unscaledTime + duration;
         }
 
-        public void Hit(Vector3 position, float damage, bool critical, bool blocked)
+        public void Hit(Vector3 position, float damage, bool critical, bool blocked, bool lethal = false)
         {
-            Critical = critical;
+            Critical = critical && !blocked;
+            Blocked = blocked;
             LastHitPosition = position;
             HitUntil = Time.time + 0.25f;
-            Play(blocked ? FeedbackSound.Block : FeedbackSound.Hit, blocked ? 0.9f : critical ? 1.0f : 0.8f);
+            if (blocked)
+                Play(FeedbackSound.Block, 0.9f);
+            else if (Critical)
+                Play(FeedbackSound.Headshot, 1f);
+            else
+                Play(FeedbackSound.Hit, 0.8f);
+
             Impact?.Invoke(position, blocked ? GameLanguage.Text("BLOCK", "막힘") : Mathf.CeilToInt(damage) + (critical ? "!" : ""),
                 blocked ? new Color(0.65f,0.83f,1f) : critical ? new Color(1f,0.79f,0.33f) : Color.white);
-            CombatEffects.Instance?.Burst(position, blocked, false);
+
             if (blocked)
             {
+                CombatEffects.Instance?.Burst(position, true, false);
+                CombatEffects.Instance?.ShieldBlock(position);
                 // In practice the tutorial director owns the coaching copy.
                 if (GameManager.Instance == null || GameManager.Instance.State != GameState.Tutorial)
-                    Notify(GameLanguage.Text("SHIELD BLOCKED", "방패에 막혔습니다"), GameLanguage.Text("Aim above the shield", "방패 위를 조준하세요"), 1f);
+                    Notify(GameLanguage.Text("SHIELD BLOCKED", "방패에 막혔습니다"), GameLanguage.Text("Aim above the shield", "방패 위쪽을 조준하세요"), 1f);
             }
-            else if (critical) Notify(GameLanguage.Text("HEADSHOT", "머리 명중"), GameLanguage.Text("Precision damage", "치명적인 명중"), 0.7f);
+            else if (Critical)
+            {
+                // Restrained accent: the larger hit marker, a warm ring and a
+                // single short callout. A lethal headshot leaves the ring to
+                // the kill accent so two circles never fire together.
+                CombatEffects.Instance?.Burst(position, false, false, true);
+                if (!lethal) CombatEffects.Instance?.Headshot(position);
+                Notify(GameLanguage.Text("HEADSHOT", "헤드샷"), GameLanguage.Text("Precision damage", "정밀 타격"), 0.6f);
+            }
+            else
+            {
+                CombatEffects.Instance?.Burst(position, false, false);
+            }
+        }
+
+        /// <summary>A distinct confirmation for a broken swing.</summary>
+        public void Interrupted(Vector3 position, float scale, bool boss)
+        {
+            Play(FeedbackSound.Interrupt, boss ? 1f : 0.8f);
+            CombatEffects.Instance?.Interrupt(position, scale);
+            Notify(GameLanguage.Text("INTERRUPTED", "공격 저지"),
+                boss ? GameLanguage.Text("The brute's swing is broken", "오우거의 공격을 끊었습니다")
+                     : GameLanguage.Text("The attack is broken", "적의 공격을 끊었습니다"), 0.9f);
+        }
+
+        /// <summary>One pooled death accent shared by every role.</summary>
+        public void Defeated(Vector3 position, float scale, bool headshot, bool boss)
+        {
+            Play(FeedbackSound.Kill, boss ? 1f : 0.8f);
+            CombatEffects.Instance?.Defeat(position, scale, headshot);
+            if (boss)
+                Notify(GameLanguage.Text("THE BRUTE FALLS", "오우거 쓰러짐"),
+                    GameLanguage.Text("The line breaks", "적의 대열이 무너집니다"), 1.6f);
         }
 
         /// <summary>
@@ -198,10 +265,12 @@ namespace Archer
         public void Miss(MissReason reason, Vector3 position)
         {
             if (reason == MissReason.Blocked) return;
+            Critical = false;
+            Blocked = false;
             LastHitPosition = position;
             if (reason == MissReason.Short)
-                Notify(GameLanguage.Text("FELL SHORT", "짧았습니다"),
-                    GameLanguage.Text("Draw longer, or aim a little higher", "더 당기거나 조금 더 높이 겨누세요"), 1.1f);
+                Notify(GameLanguage.Text("FELL SHORT", "짧게 떨어짐"),
+                    GameLanguage.Text("Draw longer, or aim a little higher", "더 당기거나 조금 더 높게 겨누세요"), 1.1f);
             else
                 Notify(GameLanguage.Text("MISSED", "빗나갔습니다"),
                     GameLanguage.Text("Lead the target as it moves", "움직이는 적의 앞을 겨누세요"), 1.1f);

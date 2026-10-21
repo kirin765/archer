@@ -45,6 +45,7 @@ namespace Archer
         GameObject _archerRoot;
         Camera _camera;
         Light _sun;
+        Light _moonRim;
         ArcherController _archer;
 
         void Awake()
@@ -67,6 +68,7 @@ namespace Archer
             BuildTimeOfDay();
             BuildHud();
             _world.gameObject.AddComponent<ForestAtmosphere>();
+            Fireflies.Create(_world, 34);
             gameObject.AddComponent<RuntimeMaterials>().Capture(_world);
             var effects = new GameObject("Combat effects");
             effects.transform.SetParent(_world, false);
@@ -93,6 +95,10 @@ namespace Archer
 
             var woodMat = Prim.Material(new Color(0.33f, 0.22f, 0.13f), 0.1f);
             var darkWoodMat = Prim.Material(new Color(0.24f, 0.16f, 0.09f), 0.1f);
+            // One iron and one glow material shared by every lantern, instead
+            // of a fresh pair per lantern (six lanterns = twelve materials).
+            var lanternIron = Prim.Material(new Color(0.12f,0.12f,0.10f),0.2f,0.4f);
+            var lanternGlow = Prim.Emissive(new Color(1f,0.65f,0.20f),2.5f);
 
             // Fence posts + rails flank the lane (center stays open).
             float side = 6.1f;
@@ -110,12 +116,12 @@ namespace Archer
                 }
 
                 // A lantern every other post for warm amber light.
-                BuildLantern(gate, new Vector3(s * side, 2.0f, 4f));
-                BuildLantern(gate, new Vector3(s * side, 2.0f, 13.6f));
+                BuildLantern(gate, new Vector3(s * side, 2.0f, 4f), lanternIron, lanternGlow);
+                BuildLantern(gate, new Vector3(s * side, 2.0f, 13.6f), lanternIron, lanternGlow);
             }
 
-            BuildLantern(gate, new Vector3(-1.30f, 2.1f, 0.2f));
-            BuildLantern(gate, new Vector3(1.30f, 2.1f, 0.2f));
+            BuildLantern(gate, new Vector3(-1.30f, 2.1f, 0.2f), lanternIron, lanternGlow);
+            BuildLantern(gate, new Vector3(1.30f, 2.1f, 0.2f), lanternIron, lanternGlow);
 
             // A wooden gate arch at the near edge, framing the approach.
             float gw = 1.5f;
@@ -126,13 +132,11 @@ namespace Archer
                 new Vector3(gw * 2f + 0.5f, 0.36f, 0.36f), darkWoodMat, false);
 
             // The fence, posts and lantern frames are static: batch them once.
-            StaticBatchingUtility.Combine(gate.gameObject);
+            SceneryBatcher.Combine(gate.gameObject, 100f);
         }
 
-        void BuildLantern(Transform parent, Vector3 localPos)
+        void BuildLantern(Transform parent, Vector3 localPos, Material iron, Material glow)
         {
-            var iron = Prim.Material(new Color(0.12f,0.12f,0.10f),0.2f,0.4f);
-            var glow = Prim.Emissive(new Color(1f,0.65f,0.20f),2.5f);
             Prim.Create(PrimitiveType.Cube,"Lantern flame",parent,localPos,new Vector3(0.26f,0.40f,0.26f),glow,false);
             for(int y=-1;y<=1;y+=2)
                 Prim.Create(PrimitiveType.Cube,"Lantern cap",parent,localPos+Vector3.up*(y*0.23f),new Vector3(0.40f,0.07f,0.40f),iron,false);
@@ -161,6 +165,7 @@ namespace Archer
             var rim = fill.AddComponent<Light>();
             rim.type = LightType.Directional; rim.intensity = 0.6f;
             rim.color = new Color(0.48f, 0.67f, 1f);
+            _moonRim = rim;
         }
 
         void BuildCamera()
@@ -198,7 +203,7 @@ namespace Archer
             controller.MaxPitch = MaxPitch;
             controller.MaxYaw = MaxYaw;
             controller.ArrowDamage = ArrowDamage;
-            controller.ShowAimGuide = PlayerPrefs.GetInt("LastRanger.Guide", 1) == 1;   // on by default for beginners
+            controller.ShowAimGuide = GameSettings.ShowAimGuide;   // on by default for beginners
             controller.Initialize(_archerRoot.transform, _arrowParent);
         }
 
@@ -224,7 +229,7 @@ namespace Archer
 
         void BuildTimeOfDay()
         {
-            var tod = TimeOfDay.Create(_camera, _sun);
+            var tod = TimeOfDay.Create(_camera, _sun, _moonRim);
             tod.StartTime = StartTimeOfDay;
             tod.ResetToStart();
             tod.transform.SetParent(_world, false);

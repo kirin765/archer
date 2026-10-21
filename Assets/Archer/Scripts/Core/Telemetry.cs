@@ -60,6 +60,11 @@ namespace Archer
             Emit("upgrade", $"{{\"kind\":\"{kind}\",\"raid\":{CurrentRaid()}}}");
         }
 
+        public static void ObjectiveFinished(string kind, bool success, int progress, int target)
+        {
+            Emit("objective", $"{{\"kind\":\"{kind}\",\"success\":{success.ToString().ToLowerInvariant()},\"progress\":{progress},\"target\":{target},\"raid\":{CurrentRaid()}}}");
+        }
+
         /// <summary>Called on death or victory.</summary>
         public static void RunEnded(bool victory, int raid)
         {

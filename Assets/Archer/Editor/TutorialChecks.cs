@@ -78,6 +78,20 @@ namespace Archer.EditorTools
             Check(plan.Exists(o => o.Role == MonsterRole.Shield), "The brute is screened by shields");
             RaidPlan.Build(2, plan);
             Check(plan.Exists(o => o.Role == MonsterRole.Runner), "Raid two introduces the runner");
+            RaidPlan.Build(6, plan);
+            Check(plan.Count >= 8 && plan.Exists(o => o.Role == MonsterRole.Shield) && plan.Exists(o => o.Role == MonsterRole.Runner),
+                "Chapter two opens with a wider, mixed wave");
+            RaidPlan.Build(10, plan);
+            Check(plan[0].Role == MonsterRole.Ogre && plan.Exists(o => o.Role == MonsterRole.Shield),
+                "Chapter two ends with the warden and its guard");
+            Check(GameManager.TotalRaids == 10 && GameManager.RaidsPerChapter == 5 && GameManager.TotalChapters == 2,
+                "Two chapters contain five raids each");
+            Check(GameManager.ChapterOf(1) == 1 && GameManager.ChapterOf(5) == 1
+                && GameManager.ChapterOf(6) == 2 && GameManager.ChapterOf(10) == 2,
+                "Raid numbers map to the correct chapter");
+            Check(GameManager.RaidInChapter(5) == 5 && GameManager.RaidInChapter(6) == 1
+                && GameManager.EndsChapter(5) && GameManager.EndsChapter(10),
+                "Chapter boundaries land after every fifth raid");
 
             // 1 · A fresh run opens into practice, not straight into a raid.
             PlayerPrefs.DeleteKey("LastRanger.Practiced");
@@ -87,6 +101,12 @@ namespace Archer.EditorTools
             Check(gm.Tutorial != null && gm.Tutorial.Active && gm.Tutorial.Current == TutorialDirector.Step.StillTarget,
                 "Tutorial opens on the still target");
             yield return 0.3f;
+
+            // Pause must work during practice and return to the tutorial, not a raid.
+            gm.TogglePause();
+            Check(gm.State == GameState.Paused && Time.timeScale == 0f, "Pause works during practice");
+            gm.TogglePause();
+            Check(gm.State == GameState.Tutorial && Time.timeScale == 1f, "Resume returns to practice");
 
             // 2 · Still target: two hits advance to the moving goblin.
             var targets = PracticeMonsters();
@@ -116,7 +136,7 @@ namespace Archer.EditorTools
             gm.NotifyMonsterHit(targets[0], false);
             yield return 0.1f;
             Check(gm.Tutorial.Current == TutorialDirector.Step.ShieldedHead, "Body shot on the shield does not complete the step");
-            Check(feedback != null && feedback.Message.Contains(GameLanguage.Text("AIM HIGHER", "더 높이")), "Body shot on the shield coaches aiming higher");
+            Check(feedback != null && feedback.Message.Contains(GameLanguage.Text("AIM HIGHER", "더 높게 조준")), "Body shot on the shield coaches aiming higher");
             gm.NotifyMonsterHit(targets[0], true);
             yield return 0.2f;
             Check(gm.Tutorial.Current == TutorialDirector.Step.Done, "Headshot above the shield completes practice");
@@ -133,7 +153,7 @@ namespace Archer.EditorTools
             Check(feedback.Message.Contains(GameLanguage.Text("SHIELD BLOCKED", "방패에 막혔습니다")) && gm.Blocked == 1, "Shield block reports the shield and counts");
             gm.ReportMiss(MissReason.Short, Vector3.zero);
             feedback.Miss(MissReason.Short, Vector3.zero);
-            Check(feedback.Message.Contains(GameLanguage.Text("FELL SHORT", "짧았습니다")) && gm.FellShort == 1, "A weak shot reports it fell short");
+            Check(feedback.Message.Contains(GameLanguage.Text("FELL SHORT", "짧게 떨어짐")) && gm.FellShort == 1, "A weak shot reports it fell short");
             gm.ReportMiss(MissReason.Missed, Vector3.zero);
             feedback.Miss(MissReason.Missed, Vector3.zero);
             Check(feedback.Message.Contains(GameLanguage.Text("MISSED", "빗나갔습니다")) && gm.WideMisses == 1, "A wide shot reports a plain miss");
@@ -142,7 +162,7 @@ namespace Archer.EditorTools
             // 7 · Shot-changing upgrades alter behaviour, not just numbers.
             var apply = typeof(GameManager).GetMethod("ApplyUpgrade", BindingFlags.NonPublic | BindingFlags.Instance);
             apply.Invoke(gm, new object[] { UpgradeKind.Piercing });
-            Check(gm.Piercing && gm.UpgradeLabel(UpgradeKind.Piercing).Contains("Bodkin"), "Piercing upgrade unlocks pass-through arrows");
+            Check(gm.Piercing && gm.UpgradeLabel(UpgradeKind.Piercing).Contains(GameLanguage.Text("Bodkin", "관통 화살촉")), "Piercing upgrade unlocks pass-through arrows");
             apply.Invoke(gm, new object[] { UpgradeKind.Slowing });
             Check(gm.SlowingShot, "Slowing upgrade unlocks the hamstring shot");
             var dummy = Monster.Create(gm.MonsterParent, new Vector3(0f, 0f, 12f), gm.ArcherTarget,
@@ -178,6 +198,23 @@ namespace Archer.EditorTools
                 "Touch aim lifts above the finger without shifting sideways");
             var unlifted = ArcherController.LiftForTouch(new Vector2(200f, 300f), false, 0.08f, 800f);
             Check(unlifted == new Vector2(200f, 300f), "Mouse aim stays exactly on the pointer");
+
+            // 9b · Touch drag is relative to the anchor, so the finger can stay
+            // away from the reticle instead of chasing the aim point.
+            var startAngles = new Vector2(0f, 10f);
+            var drag = new Vector2(136f, 136f);
+            var relativeA = ArcherController.RelativeAimAngles(new Vector2(100f, 100f), new Vector2(100f, 100f) + drag,
+                startAngles, 0.34f, 0.5f, new Vector2(1200f, 800f), 34f, -20f, 52f);
+            var relativeB = ArcherController.RelativeAimAngles(new Vector2(700f, 500f), new Vector2(700f, 500f) + drag,
+                startAngles, 0.34f, 0.5f, new Vector2(1200f, 800f), 34f, -20f, 52f);
+            Check(Mathf.Abs(relativeA.x - 34f) < 0.01f && Mathf.Abs(relativeA.y - 28f) < 0.01f,
+                "Touch drag applies yaw and vertical sensitivity from the anchor");
+            Check(Vector2.Distance(relativeA, relativeB) < 0.001f,
+                "Touch aim depends on drag distance, not absolute finger position");
+            var clamped = ArcherController.RelativeAimAngles(new Vector2(100f, 100f), new Vector2(1100f, 1100f),
+                startAngles, 0.34f, 0.5f, new Vector2(1200f, 800f), 34f, -20f, 52f);
+            Check(Mathf.Abs(clamped.x - 34f) < 0.01f && Mathf.Abs(clamped.y - 52f) < 0.01f,
+                "Touch aim clamps to the configured yaw and pitch limits");
 
             // 10 · Playtest telemetry records the signals we need, on disk.
             var before = System.IO.File.Exists(Telemetry.FilePath) ? System.IO.File.ReadAllText(Telemetry.FilePath) : "";

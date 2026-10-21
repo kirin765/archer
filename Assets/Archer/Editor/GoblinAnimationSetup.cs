@@ -10,6 +10,10 @@ namespace Archer.EditorTools
         const string WalkPath = "Assets/Archer/Animations/Mixamo/Orc Walk.fbx";
         const string AttackPath = "Assets/Archer/Animations/Mixamo/Sword And Shield Slash.fbx";
         const string AvatarPath = "Assets/Archer/Animations/Goblin_Humanoid.asset";
+        // The authored rig stays outside Resources: only the decimated LOD
+        // prefab is allowed into a build, otherwise the 55 MB source model
+        // rides along in every APK.
+        const string RigPath = "Assets/Archer/Models/Monsters/Goblin_Visual_Rig.prefab";
         [MenuItem("Archer/Rebuild Goblin Animation Prefab")]
         public static void Build()
         {
@@ -48,9 +52,10 @@ namespace Archer.EditorTools
                 motion.ImpactTime = 0.4f; // Slash reaches the target at 0.6s in the 1.5s source.
                 if (motion.Walk == null || motion.Walk.length <= 0 || motion.Attack == null || motion.Attack.length <= 0)
                     throw new InvalidOperationException("Missing goblin motions.");
-                PrefabUtility.SaveAsPrefabAsset(root, "Assets/Archer/Resources/Prefabs/Goblin_Visual.prefab");
+                PrefabUtility.SaveAsPrefabAsset(root, RigPath);
                 AssetDatabase.SaveAssets();
-                Debug.Log("Goblin humanoid avatar and animated visual prefab ready.");
+                Debug.Log("Goblin humanoid avatar and animated rig prefab ready. " +
+                          "Run 'Archer/Optimize Goblin Mesh' to build the shippable LOD prefab.");
             }
             finally { UnityEngine.Object.DestroyImmediate(root); }
         }

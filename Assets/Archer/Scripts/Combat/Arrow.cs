@@ -27,7 +27,7 @@ namespace Archer
 
         public static Arrow Create(Transform parent, Vector3 position, Vector3 velocity,
             float damage, Material shaftMaterial, bool piercing = false, int pierceCapacity = 1,
-            float slowFactor = 1f, float slowDuration = 0f)
+            float slowFactor = 1f, float slowDuration = 0f, float headshotMultiplier = 1.75f)
         {
             var root = new GameObject("Arrow");
             root.transform.SetParent(parent, false);
@@ -75,6 +75,7 @@ namespace Archer
             arrow._trail.receiveShadows = false;
             arrow._trail.numCapVertices = 2;
             arrow.Damage = damage;
+            arrow.HeadshotMultiplier = headshotMultiplier;
             arrow.Piercing = piercing;
             arrow._pierceRemaining = piercing ? Mathf.Max(0, pierceCapacity) : 0;
             arrow._slowFactor = slowFactor;
@@ -84,14 +85,15 @@ namespace Archer
             arrow._flightVelocity = velocity;
 
             var flightClip = Resources.Load<AudioClip>("Audio/Arrow_Flight");
-            if (flightClip != null && PlayerPrefs.GetInt("LastRanger.Sound", 1) != 0)
+            float flightVolume = 0.65f * GameSettings.EffectsVolume;
+            if (flightClip != null && GameSettings.SoundEnabled && flightVolume > 0f)
             {
                 var audio = root.AddComponent<AudioSource>();
                 audio.clip = flightClip;
                 audio.spatialBlend = 0.65f;
                 audio.minDistance = 2f;
                 audio.maxDistance = 35f;
-                audio.volume = 0.65f;
+                audio.volume = flightVolume;
                 audio.Play();
             }
 
@@ -136,6 +138,7 @@ namespace Archer
             // A shield goblin's shield blocks the shot (aim over it, at the head).
             if (collision.collider.name == "Shield")
             {
+                collision.collider.GetComponentInParent<Monster>()?.BlockHit(point, _flightVelocity);
                 gm.ReportMiss(MissReason.Blocked, point);
                 GameFeedback.Instance?.Hit(point, 0, false, true);
                 Expire(collision.collider.transform);
@@ -150,8 +153,12 @@ namespace Archer
                 if (monster.IsDead) { Expire(); return; }
                 bool headshot = monster.IsHeadshot(point);
                 float damage = Damage * (headshot ? HeadshotMultiplier : 1f);
+                // Crippling shot rewards keeping enemies in the slowing field.
+                if (gm.CripplingShot && monster.SlowFactor < 0.999f)
+                    damage *= 1f + gm.CrippleDamageBonus;
+                bool lethal = damage >= monster.Health - 0.0001f;
                 gm.RegisterHit(headshot);
-                GameFeedback.Instance?.Hit(point, damage, headshot, false);
+                GameFeedback.Instance?.Hit(point, damage, headshot, false, lethal);
                 if (_slowDuration > 0f) monster.ApplySlow(_slowFactor, _slowDuration);
 
                 // A piercing arrow passes through and keeps flying into the next enemy.
@@ -170,12 +177,12 @@ namespace Archer
                         _rb.linearVelocity = _flightVelocity;
                         _rb.angularVelocity = Vector3.zero;
                     }
-                    monster.TakeDamage(damage, headshot);
+                    monster.TakeDamage(damage, headshot, _flightVelocity);
                     gm.NotifyMonsterHit(monster, headshot);
                     return;
                 }
 
-                monster.TakeDamage(damage, headshot);
+                monster.TakeDamage(damage, headshot, _flightVelocity);
                 gm.NotifyMonsterHit(monster, headshot);
                 Expire(monster.transform);
                 return;

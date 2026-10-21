@@ -21,13 +21,15 @@ namespace Archer
         public float MaxLaunchSpeed = 30f;
         public float MinPower = 0.28f;
         [Tooltip("Seconds of holding to charge from minimum power to full power.")]
-        public float ChargeTime = 0.85f;
+        public float ChargeTime = 1.5f;
         [Tooltip("Fraction of the smaller screen dimension treated as a full aim drag.")]
         public float FullDrawScreenFraction = 0.34f;
         [Tooltip("Multiplier on up/down drag -> shot angle response. Below 1 = less sensitive.")]
         public float VerticalAimSensitivity = 0.5f;
         [Tooltip("On touch screens, raise the aim point above the finger by this fraction of screen height so the target stays visible.")]
         [Range(0f, 0.2f)] public float TouchAimLiftFraction = 0.08f;
+        [Tooltip("Touch drag multiplier from the accessibility settings (1 = default).")]
+        [Range(0.5f, 1.5f)] public float AimSensitivity = 1f;
 
         [Header("Arrow")]
         public float ArrowDamage = 34f;
@@ -43,6 +45,7 @@ namespace Archer
         public bool ShowAimGuide = true;
 
         Camera _camera;
+        readonly RaycastHit[] _aimHits = new RaycastHit[24];
         Transform _root;
         Transform _shoulder;
         Transform _bowPivot;
@@ -61,6 +64,8 @@ namespace Archer
         bool _canAimLast;
         bool _suppressUntilRelease;
         Vector2 _anchor;
+        float _anchorYaw;
+        float _anchorPitch;
         float _yaw;
         float _pitch;
         float _power;
@@ -68,7 +73,7 @@ namespace Archer
         Vector2 _aimScreen;
         public Vector3 PredictedImpact { get; private set; }
         public bool HasPrediction { get; private set; }
-        public Vector2 ReticlePosition => ShowAimGuide && _camera != null && HasPrediction
+        public Vector2 ReticlePosition => _camera != null && HasPrediction
             ? (Vector2)_camera.WorldToScreenPoint(PredictedImpact) : _aimScreen;
         public Vector3 LaunchPosition => _nock.position + AimDirection * 0.3f;
         public Vector3 LaunchVelocity => AimDirection * CurrentSpeed;
@@ -98,7 +103,15 @@ namespace Archer
         {
             _root = root;
             _arrowParent = arrowParent;
+            ApplySettings();
             Build();
+        }
+
+        /// <summary>Re-read persisted control/accessibility preferences after a settings change.</summary>
+        public void ApplySettings()
+        {
+            AimSensitivity = GameSettings.AimSensitivity;
+            ShowAimGuide = GameSettings.ShowAimGuide;
         }
 
         void Build()
@@ -255,6 +268,11 @@ namespace Archer
             _anchor = InputService.Position;
             _aimScreen = _anchor;
             AimAtScreenPoint(AimPoint(_anchor));
+            // A touch drag is relative to where the finger landed. The first
+            // tap still places the shot; subsequent movement only nudges the
+            // aim, so the finger never has to sit on the reticle.
+            _anchorYaw = _yaw;
+            _anchorPitch = _pitch;
             _power = MinPower;
             _nockedArrow.gameObject.SetActive(true);
         }
@@ -274,6 +292,25 @@ namespace Archer
             return pointer + Vector2.up * (screenHeight * fraction);
         }
 
+        /// <summary>
+        /// Converts a touch drag into yaw/pitch relative to the touch anchor.
+        /// Dragging <paramref name="fullDrawFraction"/> of the smaller screen
+        /// dimension sweeps the full yaw range; vertical response is scaled
+        /// separately. Pure helper so the touch controls can be tested without
+        /// a device.
+        /// </summary>
+        public static Vector2 RelativeAimAngles(Vector2 anchor, Vector2 pointer, Vector2 startAngles,
+            float fullDrawFraction, float verticalSensitivity, Vector2 screenSize,
+            float maxYaw, float minPitch, float maxPitch)
+        {
+            float unit = Mathf.Max(1f, Mathf.Min(screenSize.x, screenSize.y) * Mathf.Max(0.01f, fullDrawFraction));
+            Vector2 delta = pointer - anchor;
+            float yaw = Mathf.Clamp(startAngles.x + delta.x / unit * maxYaw * 2f, -maxYaw, maxYaw);
+            float range = Mathf.Max(0.01f, maxPitch - minPitch);
+            float pitch = Mathf.Clamp(startAngles.y + delta.y / unit * range * verticalSensitivity, minPitch, maxPitch);
+            return new Vector2(yaw, pitch);
+        }
+
         void AimAtScreenPoint(Vector2 screen)
         {
             if (_camera == null)
@@ -287,8 +324,10 @@ namespace Archer
             // Restrict ray distance to the battlefield. Ignore our own projectile colliders.
             Vector3 target = ray.origin + ray.direction * 35f;
             float nearest = 80f;
-            foreach (var hit in Physics.RaycastAll(ray, 80f))
+            int count = Physics.RaycastNonAlloc(ray, _aimHits, 80f);
+            for (int i = 0; i < count; i++)
             {
+                var hit = _aimHits[i];
                 if (hit.collider.GetComponentInParent<Arrow>() != null || hit.distance >= nearest) continue;
                 nearest = hit.distance;
                 target = hit.point;
@@ -314,7 +353,22 @@ namespace Archer
         void UpdateAim(Vector2 pointer)
         {
             _aimScreen = pointer;
-            AimAtScreenPoint(AimPoint(pointer));
+            if (InputService.IsTouch)
+            {
+                // Touch is relative: the tap places the shot, then dragging
+                // adjusts it from the anchor instead of chasing the finger.
+                // Sensitivity scales the drag before the normal clamps apply.
+                Vector2 drag = (pointer - _anchor) * Mathf.Clamp(AimSensitivity, 0.5f, 1.5f);
+                Vector2 angles = RelativeAimAngles(_anchor, _anchor + drag, new Vector2(_anchorYaw, _anchorPitch),
+                    FullDrawScreenFraction, VerticalAimSensitivity, new Vector2(Screen.width, Screen.height),
+                    MaxYaw, MinPitch, MaxPitch);
+                _yaw = angles.x;
+                _pitch = angles.y;
+            }
+            else
+            {
+                AimAtScreenPoint(AimPoint(pointer));
+            }
         }
 
         void ResetPose()
@@ -347,6 +401,9 @@ namespace Archer
                     float x = i == 0 ? .06f : i == 1 ? .045f : 0;
                     Vector3 b = new Vector3(x, side * (y - flex * (i + 1) * .12f), z);
                     var limb = _limbs[(side == -1 ? 0 : 3) + i];
+                    // The bow is torn down with the camera; a late Update
+                    // during teardown would otherwise throw every frame.
+                    if (limb == null) continue;
                     limb.localPosition = (a + b) * .5f;
                     limb.localRotation = Quaternion.FromToRotation(Vector3.up, b - a);
                     limb.localScale = new Vector3(.055f - i * .01f, (b - a).magnitude * .5f, .055f - i * .01f);
@@ -428,7 +485,8 @@ namespace Archer
             Arrow.Create(_arrowParent, spawn, dir * CurrentSpeed, ArrowDamage, _arrowMaterial,
                 gm.Piercing, gm.PierceCapacity,
                 gm.SlowingShot ? gm.SlowFactor : 1f,
-                gm.SlowingShot ? gm.SlowDuration : 0f);
+                gm.SlowingShot ? gm.SlowDuration : 0f,
+                gm.HeadshotDamageMultiplier);
         }
     }
 }

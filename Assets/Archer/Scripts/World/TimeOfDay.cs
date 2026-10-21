@@ -10,16 +10,16 @@ namespace Archer
     /// </summary>
     public class TimeOfDay : MonoBehaviour
     {
-        [Tooltip("Fraction of a full day added each new raid across the twenty-raid defense.")]
-        public float AdvancePerRaid = 0.005f;
+        [Tooltip("Fraction of a full day added each new raid across the ten-raid, two-chapter defense.")]
+        public float AdvancePerRaid = 0.007f;
         [Tooltip("Fraction of a full day that passes per second of active play.")]
         public float DriftPerSecond = 0.00015f;
         [Range(0f, 1f)] public float StartTime = 0.65f;
 
         Camera _camera;
         Light _sun;
+        Light _moonRim;
         Transform _sunDisc;
-        Transform _moonDisc;
         float _time01;
         int _lastRaid;
         float _appliedTime = -1f;
@@ -48,12 +48,13 @@ namespace Archer
         static readonly Color Twilight = new Color(0.42f, 0.27f, 0.32f);
         static readonly Color Day = new Color(0.45f, 0.62f, 0.85f);
 
-        public static TimeOfDay Create(Camera cam, Light sun)
+        public static TimeOfDay Create(Camera cam, Light sun, Light moonRim = null)
         {
             var go = new GameObject("TimeOfDay");
             var tod = go.AddComponent<TimeOfDay>();
             tod._camera = cam;
             tod._sun = sun;
+            tod._moonRim = moonRim;
             tod._time01 = tod.StartTime;
             tod.BuildCelestialBodies();
             return tod;
@@ -67,10 +68,7 @@ namespace Archer
             _sunDisc = Prim.Create(PrimitiveType.Sphere, "SunDisc", pivot, Vector3.zero,
                 Vector3.one * 26f, Prim.Emissive(new Color(1f, 0.93f, 0.7f), 3f), false).transform;
             _sunDisc.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
-
-            _moonDisc = Prim.Create(PrimitiveType.Sphere, "MoonDisc", pivot, Vector3.zero,
-                Vector3.one * 16f, Prim.Emissive(new Color(0.85f, 0.88f, 0.98f), 1.6f), false).transform;
-            _moonDisc.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+            // The moon is drawn by the skybox shader (disc + halo), not a world sphere.
         }
 
         void Update()
@@ -131,12 +129,12 @@ namespace Archer
                     _sunDisc.position = -sunDir * 400f;
                     _sunDisc.gameObject.SetActive(false);
                 }
-                if (_moonDisc != null)
-                {
-                    _moonDisc.position = new Vector3(80f, 150f, 400f);
-                    _moonDisc.gameObject.SetActive(true);
-                }
             }
+
+            // Cool moonlight fill strengthens as dusk settles into night so
+            // enemy silhouettes stay readable against the dark forest.
+            if (_moonRim != null)
+                _moonRim.intensity = Mathf.Lerp(0.9f, 0.55f, dayFactor);
         }
 
         static Color SkyColor(float sunHeight)
