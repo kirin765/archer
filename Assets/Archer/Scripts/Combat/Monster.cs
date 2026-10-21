@@ -294,7 +294,7 @@ namespace Archer
                 // knot at the back of the skull marking the runner vs the
                 // bare-headed raiders.
                 var head = FindBone(boneRoot, "Head");
-                if (head != null)
+                if (head != null && UsableBoneScale(head))
                 {
                     // Round bandana knot, tails splayed down. Round profiles keep
                     // the accents from reading as hard slabs on the goblin.
@@ -319,7 +319,7 @@ namespace Archer
                 // cylinder reads as a wrapped cord where it crosses the chest,
                 // where a flat plate read as a slab.
                 var spine = FindBone(boneRoot, "Spine02");
-                if (spine != null)
+                if (spine != null && UsableBoneScale(spine))
                 {
                     var strap = Prim.Create(PrimitiveType.Cylinder, "Runner bandolier", spine,
                         new Vector3(0f, 0.045f, 0.095f),
@@ -354,17 +354,19 @@ namespace Archer
 
                 if (_runnerTail == null)
                 {
-                    // No rig (fallback goblin): pin the scarf in body space instead.
+                    // No usable bone rig for the costume (or a rig whose bones
+                    // carry a large import scale): pin the scarf in normalised
+                    // body space instead.
                     var scarf = Prim.Create(PrimitiveType.Capsule, "Runner scarf tail", _meshModelRoot,
-                        new Vector3(0.09f * s, 1.0f * s, -0.2f * s),
-                        new Vector3(0.025f * s, 0.12f * s, 0.025f * s), redMat, false);
+                        new Vector3(0.07f * s, 0.12f * s, -0.14f * s),
+                        new Vector3(0.02f * s, 0.10f * s, 0.02f * s), redMat, false);
                     scarf.transform.localRotation = Quaternion.Euler(30f, 0f, 16f);
                     _runnerTail = scarf.transform;
                 }
 
                 // Hip pouch on the back-left hip, closed by a dark flap.
                 var pelvis = FindBone(boneRoot, "Pelvis");
-                if (pelvis != null)
+                if (pelvis != null && UsableBoneScale(pelvis))
                 {
                     var pouch = Prim.Create(PrimitiveType.Cube, "Runner pouch", pelvis,
                         new Vector3(-0.1f, -0.04f, -0.095f),
@@ -489,8 +491,12 @@ namespace Archer
         void CollectLodRenderers(Transform visual)
         {
             _lodRenderers.Clear();
+            // Multi-part characters (the Goblin_Character model ships ten
+            // skinned parts) are not LODs: every part must stay visible. Only
+            // group renderers that are explicitly named as LOD levels.
             foreach (var r in visual.GetComponentsInChildren<SkinnedMeshRenderer>())
-                _lodRenderers.Add(r);
+                if (r != null && r.name.Contains("LOD")) _lodRenderers.Add(r);
+            if (_lodRenderers.Count < 2) { _lodRenderers.Clear(); return; }
             _lodRenderers.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
             _lodIndex = 0;
             for (int i = 0; i < _lodRenderers.Count; i++)
@@ -584,19 +590,26 @@ namespace Archer
             if (_meshModelRoot == null) return;
 
             _headInModelSpace = true;
+            // A named head bone is the most reliable anchor, especially for a
+            // multi-part character where the first skinned renderer may be a
+            // bag or a boot rather than the body.
+            if (_headBone != null)
+            {
+                Vector3 headLocal = _meshModelRoot.InverseTransformPoint(_headBone.position);
+                _headBottomLocal = headLocal.y - 0.01f;
+                _headTopLocal = headLocal.y + 0.14f;
+                return;
+            }
+
             var skin = _meshModelRoot.GetComponentInChildren<SkinnedMeshRenderer>();
             if (skin != null && skin.sharedMesh != null)
             {
                 // The top of the skull comes from the mesh, which never moves.
                 Vector3 world = skin.transform.TransformPoint(skin.sharedMesh.bounds.max);
                 float topLocal = _meshModelRoot.InverseTransformPoint(world).y;
-                if (_headBone != null)
-                {
-                    Vector3 headLocal = _meshModelRoot.InverseTransformPoint(_headBone.position);
-                    _headBottomLocal = headLocal.y + 0.01f;
-                    _headTopLocal = Mathf.Max(topLocal + 0.04f, headLocal.y + 0.05f);
-                    return;
-                }
+                _headBottomLocal = topLocal - 0.16f;
+                _headTopLocal = topLocal;
+                return;
             }
 
             // No head bone: fall back to the top of the silhouette.
@@ -630,9 +643,29 @@ namespace Archer
         static Transform FindBone(Transform root, string name)
         {
             if (root == null) return null;
+            Transform fallback = null;
             foreach (var t in root.GetComponentsInChildren<Transform>())
+            {
                 if (t.name == name) return t;
-            return null;
+                // Authored rigs differ in casing ("Head" vs "head"); treat the
+                // match case-insensitively before giving up on a bone.
+                if (fallback == null && string.Equals(t.name, name, System.StringComparison.OrdinalIgnoreCase))
+                    fallback = t;
+            }
+            return fallback;
+        }
+
+        /// <summary>
+        /// Procedural costume pieces are authored in bone space, so a rig whose
+        /// bones carry a large import scale (the Goblin_Character rig uses 100)
+        /// would blow them up to room size. Skip the hand-authored costume for
+        /// those rigs and use the normalised fallback pieces instead.
+        /// </summary>
+        static bool UsableBoneScale(Transform bone)
+        {
+            if (bone == null) return false;
+            Vector3 scale = bone.lossyScale;
+            return Mathf.Abs(scale.x) < 3f && Mathf.Abs(scale.y) < 3f && Mathf.Abs(scale.z) < 3f;
         }
 
         /// <summary>True when a hit point lands on the head band of this monster.</summary>

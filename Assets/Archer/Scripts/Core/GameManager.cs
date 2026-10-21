@@ -19,12 +19,9 @@ namespace Archer
         Heal,
         MaxHealth,
         Damage,
-        Arrows,
         QuickDraw,
-        Recovery,
         Piercing,
         Slowing,
-        HeadshotRefund,
         Deadeye,
         DeepPierce,
         Crippling
@@ -47,42 +44,49 @@ namespace Archer
     }
 
     /// <summary>
-    /// Owns the raid loop: spawning waves, tracking archer health and
-    /// arrows, and switching between play / between-raid / game-over states.
+    /// Owns the raid loop: spawning waves, tracking archer health and switching between play / between-raid / game-over states.
     /// </summary>
     public class GameManager : MonoBehaviour
     {
         public static GameManager Instance { get; private set; }
 
-        /// <summary>Five raids per chapter. Chapters one and two are authored.</summary>
+        /// <summary>Five raids per chapter. All three chapters are authored.</summary>
         public const int RaidsPerChapter = 5;
-        public const int TotalChapters = 2;
+        public const int TotalChapters = 3;
         public const int TotalRaids = RaidsPerChapter * TotalChapters;
 
         public static int ChapterOf(int raid) => Mathf.Clamp((raid - 1) / RaidsPerChapter + 1, 1, TotalChapters);
         public static int RaidInChapter(int raid) => ((raid - 1) % RaidsPerChapter) + 1;
         public static bool EndsChapter(int raid) => raid > 0 && raid % RaidsPerChapter == 0;
+        public static string ChapterNumberWord(int chapter) => chapter switch
+        {
+            1 => "One",
+            2 => "Two",
+            3 => "Three",
+            _ => chapter.ToString()
+        };
         public static string ChapterName(int chapter) => chapter switch
         {
             1 => GameLanguage.Text("THE FOREST WATCH", "숲의 수호자"),
             2 => GameLanguage.Text("THE LONG NIGHT", "긴 밤"),
+            3 => GameLanguage.Text("THE DARKEST HOUR", "가장 어두운 시간"),
             _ => GameLanguage.Text($"CHAPTER {chapter}", $"{chapter}장")
         };
         public static string ChapterClearTitle(int chapter) => chapter switch
         {
             1 => GameLanguage.Text("CHAPTER ONE CLEARED", "1장 완료"),
             2 => GameLanguage.Text("CHAPTER TWO CLEARED", "2장 완료"),
+            3 => GameLanguage.Text("CHAPTER THREE CLEARED", "3장 완료"),
             _ => GameLanguage.Text($"CHAPTER {chapter} CLEARED", $"{chapter}장 완료")
         };
+        /// <summary>Copy for the card that opens the next chapter.</summary>
+        public static string ChapterStartLine(int chapter) => GameLanguage.Text(
+            $"Chapter {ChapterNumberWord(chapter)} begins.\nFive raids remain.",
+            $"{chapter}장이 시작됩니다.\n다섯 번의 습격이 남았습니다.");
 
         [Header("Archer")]
         public float MaxHealth = 100f;
         public float Health = 100f;
-
-        [Header("Quiver")]
-        public int MaxArrows = 6;
-        public int Arrows = 12;
-        public float ArrowRegenInterval = 1.35f;
 
         [Header("Spawn lane")]
         public float SpawnHalfWidth = 8f;
@@ -94,7 +98,6 @@ namespace Archer
         public float HealAmount = 35f;
         public float MaxHealthStep = 25f;
         public float ArrowPowerStep = 8f;
-        public int ExtraArrowsStep = 2;
 
         [Header("Shot-changing upgrades")]
         [Tooltip("How many enemies a piercing arrow passes through after the first.")]
@@ -105,7 +108,6 @@ namespace Archer
         public float SlowDuration = 2.2f;
         public bool Piercing;
         public bool SlowingShot;
-        public bool RefundHeadshotKills;
         [Header("Upgrade synergies")]
         public float HeadshotDamageMultiplier = 1.75f;
         public float HeadshotDamageStep = 0.35f;
@@ -302,6 +304,17 @@ namespace Archer
                 case 10:
                     if (ogres > 0) { ObjectiveKind = RaidObjectiveKind.InterruptBrute; ObjectiveTarget = 2; }
                     break;
+                // Chapter three alternates the two lessons: clear the runners
+                // before they reach the gate, then break every brute's swing.
+                case 11:
+                case 13:
+                    if (runners > 0) { ObjectiveKind = RaidObjectiveKind.StopRunners; ObjectiveTarget = runners; }
+                    break;
+                case 12:
+                case 14:
+                case 15:
+                    if (ogres > 0) { ObjectiveKind = RaidObjectiveKind.InterruptBrute; ObjectiveTarget = ogres; }
+                    break;
             }
             if (ObjectiveKind != RaidObjectiveKind.None) ObjectivesAttempted++;
         }
@@ -387,17 +400,12 @@ namespace Archer
         readonly List<SpawnOrder> _spawnQueue = new List<SpawnOrder>();
         int _spawnIndex;
         float _spawnTimer;
-        float _arrowTimer;
 
         [Header("Spawning")]
         public float SpawnInterval = 0.9f;
 
-        /// <summary>0..1 progress toward the next regenerated arrow.</summary>
-        public float ArrowRegenProgress =>
-            ArrowRegenInterval > 0f ? Mathf.Clamp01(_arrowTimer / ArrowRegenInterval) : 0f;
         float _baseMaxHealth;
-        int _baseMaxArrows;
-        float _baseArrowDamage, _baseChargeTime, _baseRegenInterval;
+        float _baseArrowDamage, _baseChargeTime;
         int _basePierceCapacity;
         float _baseHeadshotMultiplier;
 
@@ -416,10 +424,8 @@ namespace Archer
         void Start()
         {
             _baseMaxHealth = MaxHealth;
-            _baseMaxArrows = MaxArrows;
             _baseArrowDamage = Archer != null ? Archer.ArrowDamage : 0f;
-            _baseChargeTime = Archer != null ? Archer.ChargeTime : 1.5f;
-            _baseRegenInterval = ArrowRegenInterval;
+            _baseChargeTime = Archer != null ? Archer.ChargeTime : 1f;
             _basePierceCapacity = PierceCapacity;
             _baseHeadshotMultiplier = HeadshotDamageMultiplier;
             Tutorial = gameObject.AddComponent<TutorialDirector>();
@@ -428,9 +434,8 @@ namespace Archer
         void RollOffers()
         {
             _offers.Clear();
-            var pool = new List<UpgradeKind> { UpgradeKind.MaxHealth, UpgradeKind.Damage, UpgradeKind.Arrows };
+            var pool = new List<UpgradeKind> { UpgradeKind.MaxHealth, UpgradeKind.Damage };
             if (Archer != null && Archer.ChargeTime > 0.46f) pool.Add(UpgradeKind.QuickDraw);
-            if (ArrowRegenInterval > 0.51f) pool.Add(UpgradeKind.Recovery);
             if (Health < MaxHealth) pool.Add(UpgradeKind.Heal);   // don't offer a useless heal
 
             // Surface one shot-changing upgrade whenever one is still available, so
@@ -438,7 +443,6 @@ namespace Archer
             var special = new List<UpgradeKind>();
             if (!Piercing) special.Add(UpgradeKind.Piercing);
             if (!SlowingShot) special.Add(UpgradeKind.Slowing);
-            if (!RefundHeadshotKills) special.Add(UpgradeKind.HeadshotRefund);
             if (!Deadeye) special.Add(UpgradeKind.Deadeye);
             if (Piercing && !DeepPierce) special.Add(UpgradeKind.DeepPierce);
             if (SlowingShot && !CripplingShot) special.Add(UpgradeKind.Crippling);
@@ -467,23 +471,16 @@ namespace Archer
             UpgradeKind.Heal => GameLanguage.Text($"Field dressing\n{Mathf.CeilToInt(Health)} → {Mathf.CeilToInt(Mathf.Min(MaxHealth,Health+HealAmount))} HP", $"응급 처치\n체력 {Mathf.CeilToInt(Health)} → {Mathf.CeilToInt(Mathf.Min(MaxHealth,Health+HealAmount))}"),
             UpgradeKind.MaxHealth => GameLanguage.Text($"Fortitude\n{MaxHealth:0} → {MaxHealth+MaxHealthStep:0} max HP", $"강인함\n최대 체력 {MaxHealth:0} → {MaxHealth+MaxHealthStep:0}"),
             UpgradeKind.Damage => GameLanguage.Text($"Broadheads\n{Archer.ArrowDamage:0} → {Archer.ArrowDamage+ArrowPowerStep:0} damage", $"강철 화살촉\n공격력 {Archer.ArrowDamage:0} → {Archer.ArrowDamage+ArrowPowerStep:0}"),
-            UpgradeKind.Arrows => GameLanguage.Text($"Deep quiver\n{MaxArrows} → {MaxArrows+ExtraArrowsStep} arrows", $"큰 화살통\n화살 {MaxArrows} → {MaxArrows+ExtraArrowsStep}개"),
             UpgradeKind.QuickDraw => GameLanguage.Text($"Quickdraw\n{Archer.ChargeTime:0.00}s → {Mathf.Max(0.45f,Archer.ChargeTime*0.8f):0.00}s draw", $"빠른 사격\n당기기 {Archer.ChargeTime:0.00} → {Mathf.Max(0.45f,Archer.ChargeTime*0.8f):0.00}초"),
-            UpgradeKind.Recovery => GameLanguage.Text($"Fletcher\n{ArrowRegenInterval:0.00}s → {Mathf.Max(0.5f,ArrowRegenInterval*0.8f):0.00}s recovery", $"화살 보급\n보충 {ArrowRegenInterval:0.00} → {Mathf.Max(0.5f,ArrowRegenInterval*0.8f):0.00}초"),
             UpgradeKind.Piercing => GameLanguage.Text(
                 "Bodkin points\nPierce the first enemy\n" + (SlowingShot ? "Synergy: slows pierced foes" : "Pairs with Hamstring"),
                 "관통 화살촉\n첫 적을 꿰뚫습니다\n" + (SlowingShot ? "시너지: 관통한 적 둔화" : "급소 사격과 조합")),
             UpgradeKind.Slowing => GameLanguage.Text(
                 "Hamstring shot\nHits slow the enemy\n" + (CripplingShot ? "Synergy: +25% to slowed foes" : "Pairs with Crippling"),
                 "급소 사격\n명중한 적 둔화\n" + (CripplingShot ? "시너지: 둔화 적 +25% 피해" : "약점 사격과 조합")),
-            UpgradeKind.HeadshotRefund => GameLanguage.Text(
-                "Recover\nHeadshot kills refund ammo\n" + (Deadeye ? "Synergy: raises headshot damage" : "Pairs with Deadeye"),
-                "화살 회수\n헤드샷 처치 시 회수\n" + (Deadeye ? "시너지: 헤드샷 피해 증가" : "정밀 사격과 조합")),
             UpgradeKind.Deadeye => GameLanguage.Text(
-                $"Deadeye\nHeadshot damage +{Mathf.RoundToInt(HeadshotDamageStep / HeadshotDamageMultiplier * 100f)}%" +
-                (RefundHeadshotKills ? "\nSynergy: headshot kills refund" : "\nPairs with Recover"),
-                $"정밀 사격\n헤드샷 피해 +{Mathf.RoundToInt(HeadshotDamageStep / HeadshotDamageMultiplier * 100f)}%" +
-                (RefundHeadshotKills ? "\n시너지: 헤드샷 처치 시 회수" : "\n화살 회수와 조합")),
+                $"Deadeye\nHeadshot damage +{Mathf.RoundToInt(HeadshotDamageStep / HeadshotDamageMultiplier * 100f)}%",
+                $"정밀 사격\n헤드샷 피해 +{Mathf.RoundToInt(HeadshotDamageStep / HeadshotDamageMultiplier * 100f)}%"),
             UpgradeKind.DeepPierce => GameLanguage.Text(
                 "Split shaft\nPiercing +1 more enemy\n" + (SlowingShot ? "Synergy: slows pierced foes" : "Pairs with Hamstring"),
                 "갈라진 화살대\n관통 대상 +1\n" + (SlowingShot ? "시너지: 관통한 적 둔화" : "급소 사격과 조합")),
@@ -521,21 +518,11 @@ namespace Archer
                 case UpgradeKind.QuickDraw:
                     if (Archer != null) Archer.ChargeTime = Mathf.Max(0.45f, Archer.ChargeTime * 0.8f);
                     break;
-                case UpgradeKind.Recovery:
-                    ArrowRegenInterval = Mathf.Max(0.5f, ArrowRegenInterval * 0.8f);
-                    break;
-                case UpgradeKind.Arrows:
-                    MaxArrows += ExtraArrowsStep;
-                    Arrows = MaxArrows;
-                    break;
                 case UpgradeKind.Piercing:
                     Piercing = true;
                     break;
                 case UpgradeKind.Slowing:
                     SlowingShot = true;
-                    break;
-                case UpgradeKind.HeadshotRefund:
-                    RefundHeadshotKills = true;
                     break;
                 case UpgradeKind.Deadeye:
                     Deadeye = true;
@@ -556,16 +543,6 @@ namespace Archer
             if (State != GameState.Playing) return;
 
             SpawnStep();
-
-            if (Arrows < MaxArrows)
-            {
-                _arrowTimer += Time.deltaTime;
-                if (_arrowTimer >= ArrowRegenInterval)
-                {
-                    _arrowTimer = 0f;
-                    Arrows++;
-                }
-            }
         }
 
         void SpawnStep()
@@ -600,7 +577,7 @@ namespace Archer
             }
         }
 
-        // Authored per-role baselines with only a gentle late-raid scale.
+        // Authored per-role baselines with a small, even step every raid.
         static void RoleStats(MonsterRole role, int raid, out float health, out float speed, out float damage)
         {
             switch (role)
@@ -610,10 +587,25 @@ namespace Archer
                 case MonsterRole.Ogre: health = 300f; speed = 1.0f; damage = 20f; break;
                 default: health = 40f; speed = 1.5f; damage = 8f; break;   // Raider
             }
-            int extra = Mathf.Max(0, raid - RaidsPerChapter);
-            health *= 1f + 0.06f * extra;
-            speed *= 1f + 0.015f * extra;
-            damage *= 1f + 0.03f * extra;
+            DifficultyScale(raid, out float healthScale, out float speedScale, out float damageScale);
+            health *= healthScale;
+            speed *= speedScale;
+            damage *= damageScale;
+        }
+
+        /// <summary>
+        /// Per-raid difficulty multipliers. Raid one is the baseline and every
+        /// later raid adds a small step, so the curve never leaps at a
+        /// chapter boundary. At raid fifteen this reaches ≈1.42 health,
+        /// 1.08 speed and 1.21 damage, spreading the whole climb evenly over
+        /// all three chapters instead of one chapter-two step.
+        /// </summary>
+        public static void DifficultyScale(int raid, out float health, out float speed, out float damage)
+        {
+            float step = Mathf.Max(0, raid - 1);
+            health = 1f + 0.030f * step;
+            speed = 1f + 0.006f * step;
+            damage = 1f + 0.015f * step;
         }
 
         // Bright, saturated values so enemies read against the cool forest.
@@ -625,14 +617,8 @@ namespace Archer
             _ => new Color(0.46f, 0.64f, 0.36f)                     // goblin raider (green)
         };
 
-        public bool TryConsumeArrow()
-        {
-            if (State != GameState.Playing && State != GameState.Tutorial) return false;
-            if (State == GameState.Tutorial) return true;   // practice fires freely
-            if (Arrows <= 0) return false;
-            Arrows--;
-            return true;
-        }
+        /// <summary>Shots are unlimited, but only active play can fire.</summary>
+        public bool CanFire => State == GameState.Playing || State == GameState.Tutorial;
 
         /// <summary>Start the opening practice: still target, moving goblin, shielded head.</summary>
         public void StartTutorial()
@@ -641,8 +627,6 @@ namespace Archer
             Archer?.CancelAim();
             ClearProjectiles();
             ClearMonsters();
-            Arrows = MaxArrows;
-            _arrowTimer = 0f;
             _offers.Clear();
             Boss = null;
             State = GameState.Tutorial;
@@ -692,8 +676,6 @@ namespace Archer
             ClearProjectiles();
             RaidNumber++;
             State = GameState.Playing;
-            Arrows = MaxArrows;
-            _arrowTimer = 0f;
             _offers.Clear();
             Boss = null;
 
@@ -725,6 +707,11 @@ namespace Archer
             8 => GameLanguage.Text("Lead the hunt", "질주병의 앞을 겨누세요"),
             9 => GameLanguage.Text("Break the guard, then the brute", "호위를 뚫고 오우거를 노리세요"),
             10 => GameLanguage.Text("The long night ends here", "긴 밤이 여기서 끝납니다"),
+            11 => GameLanguage.Text("Frost on the path, runners ahead", "서리 내린 길, 질주병이 앞섭니다"),
+            12 => GameLanguage.Text("Shields and a brute together", "방패병과 오우거가 함께 옵니다"),
+            13 => GameLanguage.Text("Hold the gate through the dark", "어둠 속에서 성문을 지키세요"),
+            14 => GameLanguage.Text("Two brutes lead the war band", "오우거 둘이 무리를 이끕니다"),
+            15 => GameLanguage.Text("The last night. The last stand.", "마지막 밤, 마지막 방어선"),
             _ => GameLanguage.Text("Hold the path", "숲길을 지키세요")
         };
 
@@ -761,13 +748,6 @@ namespace Archer
                     // The brute died before the required interrupts were earned.
                     FailObjective();
                 }
-            }
-
-            // A headshot kill returns an arrow once the upgrade is taken.
-            if (RefundHeadshotKills && monster.DiedFromHeadshot && Arrows < MaxArrows)
-            {
-                Arrows++;
-                GameFeedback.Instance?.Notify(GameLanguage.Text("ARROW RECOVERED", "화살 회수"), GameLanguage.Text("Headshot kill", "헤드샷 처치"), 0.8f);
             }
 
             if (MonstersRemaining <= 0)
@@ -853,8 +833,8 @@ namespace Archer
                 "질주병의 앞을 겨누어 성문에 닿기 전에 쏘세요."),
             MonsterRole.Shield => GameLanguage.Text("Aim above the shield; body shots are blocked.",
                 "방패 위쪽 머리를 노리세요. 몸통은 막힙니다."),
-            MonsterRole.Raider => GameLanguage.Text("Keep one arrow ready for the next enemy.",
-                "다음 적을 위해 화살 하나를 남겨 두세요."),
+            MonsterRole.Raider => GameLanguage.Text("Reach full draw and release before enemies reach the gate.",
+                "최대로 당긴 뒤 적이 성문에 닿기 전에 쏘세요."),
             _ => GameLanguage.Text("Hold your aim and keep the lane clear.",
                 "조준을 유지하고 숲길을 비우세요.")
         };
@@ -869,18 +849,38 @@ namespace Archer
 
         public void Restart()
         {
+            ResetRun();
+            Telemetry.RunStarted();
+            StartRaid();
+        }
+
+        /// <summary>
+        /// Abandon the current run and show the opening title card again. Works
+        /// from play, practice, pause and the results screen; time is restored
+        /// so a paused simulation never stays frozen behind the title.
+        /// </summary>
+        public void ReturnToTitle()
+        {
+            // Already on the title card: nothing to tear down.
+            if (State == GameState.Intermission && RaidNumber == 0 && _offers.Count == 0) return;
+            Telemetry.Quit(State.ToString(), RaidNumber);
+            ResetRun();
+        }
+
+        /// <summary>Clear every trace of the run without starting a new raid.</summary>
+        void ResetRun()
+        {
             // Clean the whole run: enemies AND any arrows still in flight, so a
             // fresh game cannot inherit hits or rewards.
             Time.timeScale = 1f;
             Archer?.CancelAim();
             ClearProjectiles();
             ClearMonsters();
-            _arrowTimer = 0f;
+            Tutorial?.Cancel();
 
             // New game: clear upgrades, run stats and the day/night clock.
             if (Archer != null) { Archer.ArrowDamage = _baseArrowDamage; Archer.ChargeTime = _baseChargeTime; }
-            ArrowRegenInterval = _baseRegenInterval;
-            Piercing = SlowingShot = RefundHeadshotKills = false;
+            Piercing = SlowingShot = false;
             Deadeye = DeepPierce = CripplingShot = false;
             HeadshotDamageMultiplier = _baseHeadshotMultiplier;
             PierceCapacity = _basePierceCapacity;
@@ -890,7 +890,6 @@ namespace Archer
             CombatEffects.Instance?.Clear();
             GameFeedback.Instance?.ResetFeedback();
             MaxHealth = _baseMaxHealth;
-            MaxArrows = _baseMaxArrows;
             _offers.Clear();
             Kills = 0;
             ShotsFired = 0;
@@ -912,10 +911,11 @@ namespace Archer
 
             Health = MaxHealth;
             RaidNumber = 0;
-            Arrows = MaxArrows;
+            MonstersRemaining = 0;
+            MonstersThisRaid = 0;
+            _spawnIndex = 0;
+            _spawnTimer = 0f;
             State = GameState.Intermission;
-            Telemetry.RunStarted();
-            StartRaid();
         }
 
         void ClearMonsters()
@@ -946,6 +946,11 @@ namespace Archer
             8 => GameLanguage.Text("THE HUNT", "사냥"),
             9 => GameLanguage.Text("THE BRUTE'S GUARD", "오우거의 호위"),
             10 => GameLanguage.Text("THE WARDEN", "감시자"),
+            11 => GameLanguage.Text("THE FIRST FROST", "첫 서리"),
+            12 => GameLanguage.Text("IRON AND ASH", "철과 재"),
+            13 => GameLanguage.Text("THE NIGHT SIEGE", "밤의 공성"),
+            14 => GameLanguage.Text("THE WAR BAND", "전쟁 무리"),
+            15 => GameLanguage.Text("THE LAST DAWN", "마지막 새벽"),
             _ => raid % 5 == 0 ? GameLanguage.Text("THE BRUTE RETURNS", "돌아온 오우거") : GameLanguage.Text($"FOREST RAID {raid}", $"숲의 습격 {raid}")
         };
 

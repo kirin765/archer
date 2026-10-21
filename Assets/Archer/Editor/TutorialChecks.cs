@@ -61,6 +61,16 @@ namespace Archer.EditorTools
             return list.ToArray();
         }
 
+        static float AverageSpawnDelay(int raid)
+        {
+            var plan = new System.Collections.Generic.List<SpawnOrder>();
+            RaidPlan.Build(raid, plan);
+            if (plan.Count == 0) return 0f;
+            float total = 0f;
+            foreach (var order in plan) total += order.Delay;
+            return total / plan.Count;
+        }
+
         static IEnumerator Checks()
         {
             var gm = GameManager.Instance;
@@ -84,14 +94,40 @@ namespace Archer.EditorTools
             RaidPlan.Build(10, plan);
             Check(plan[0].Role == MonsterRole.Ogre && plan.Exists(o => o.Role == MonsterRole.Shield),
                 "Chapter two ends with the warden and its guard");
-            Check(GameManager.TotalRaids == 10 && GameManager.RaidsPerChapter == 5 && GameManager.TotalChapters == 2,
-                "Two chapters contain five raids each");
+            RaidPlan.Build(15, plan);
+            Check(plan[0].Role == MonsterRole.Ogre && plan.FindAll(o => o.Role == MonsterRole.Ogre).Count == 2
+                && plan.Exists(o => o.Role == MonsterRole.Shield),
+                "Chapter three ends with two brutes and their guard");
+            Check(GameManager.TotalRaids == 15 && GameManager.RaidsPerChapter == 5 && GameManager.TotalChapters == 3,
+                "Three chapters contain five raids each");
             Check(GameManager.ChapterOf(1) == 1 && GameManager.ChapterOf(5) == 1
-                && GameManager.ChapterOf(6) == 2 && GameManager.ChapterOf(10) == 2,
+                && GameManager.ChapterOf(6) == 2 && GameManager.ChapterOf(10) == 2
+                && GameManager.ChapterOf(11) == 3 && GameManager.ChapterOf(15) == 3,
                 "Raid numbers map to the correct chapter");
             Check(GameManager.RaidInChapter(5) == 5 && GameManager.RaidInChapter(6) == 1
-                && GameManager.EndsChapter(5) && GameManager.EndsChapter(10),
+                && GameManager.RaidInChapter(11) == 1
+                && GameManager.EndsChapter(5) && GameManager.EndsChapter(10) && GameManager.EndsChapter(15),
                 "Chapter boundaries land after every fifth raid");
+
+            // 0b · Difficulty climbs in small, even steps instead of leaping at
+            // the chapter boundary.
+            GameManager.DifficultyScale(5, out float hp5, out float speed5, out float damage5);
+            GameManager.DifficultyScale(6, out float hp6, out float speed6, out float damage6);
+            Check(hp5 > 1.05f && hp6 > hp5 && hp6 <= hp5 * 1.04f,
+                "Enemy health steps gently across the chapter boundary");
+            Check(speed6 > speed5 && damage6 > damage5,
+                "Enemy speed and damage creep up by one step at a time");
+            float pace5 = AverageSpawnDelay(5), pace6 = AverageSpawnDelay(6);
+            Check(pace6 < pace5 && pace6 > pace5 * 0.85f,
+                "Chapter two tightens the spawn pace without a cliff");
+            Check(AverageSpawnDelay(8) < pace6 && AverageSpawnDelay(10) < AverageSpawnDelay(8),
+                "Chapter two keeps tightening raid by raid");
+            Check(AverageSpawnDelay(15) < AverageSpawnDelay(10),
+                "Chapter three keeps tightening raid by raid");
+            GameManager.DifficultyScale(14, out float hp14, out float speed14, out float damage14);
+            GameManager.DifficultyScale(15, out float hp15, out float speed15, out float damage15);
+            Check(hp15 > hp14 && hp15 <= hp14 * 1.04f && speed15 > speed14 && damage15 > damage14,
+                "The finale's stat step is no larger than any other raid's");
 
             // 1 · A fresh run opens into practice, not straight into a raid.
             PlayerPrefs.DeleteKey("LastRanger.Practiced");
@@ -169,8 +205,8 @@ namespace Archer.EditorTools
                 MonsterRole.Raider, 500f, 0f, 0f, 10f, Color.green, practice: true);
             dummy.ApplySlow(gm.SlowFactor, gm.SlowDuration);
             Check(dummy.SlowFactor < 1f, "A slowing shot actually reduces enemy speed");
-            apply.Invoke(gm, new object[] { UpgradeKind.HeadshotRefund });
-            Check(gm.RefundHeadshotKills, "Headshot refund upgrade unlocks arrow recovery");
+            apply.Invoke(gm, new object[] { UpgradeKind.Deadeye });
+            Check(gm.Deadeye && gm.HeadshotDamageMultiplier > 1.75f, "Deadeye increases headshot damage without ammunition upgrades");
             UnityEngine.Object.Destroy(dummy.gameObject);
 
             // 8 · A piercing arrow survives the first hit and keeps flying.
@@ -222,6 +258,15 @@ namespace Archer.EditorTools
             var after = System.IO.File.Exists(Telemetry.FilePath) ? System.IO.File.ReadAllText(Telemetry.FilePath) : "";
             Check(after.Length > before.Length && after.Contains("raid_clear") && after.Contains("\"accuracy\":0.75"),
                 "Telemetry writes per-raid accuracy to disk");
+
+            // 11 · A run can always be abandoned back to the title card.
+            gm.TogglePause();
+            Check(gm.State == GameState.Paused, "Pause is available before leaving a run");
+            gm.ReturnToTitle();
+            Check(gm.State == GameState.Intermission && gm.RaidNumber == 0 && Time.timeScale == 1f,
+                "Return to title leaves the raid and restores time");
+            Check(gm.RaidsCleared == 0 && gm.Score == 0 && gm.MonstersRemaining == 0 && gm.Offers.Count == 0,
+                "Return to title clears the run for a fresh start");
         }
 
         static void Finish(string status)

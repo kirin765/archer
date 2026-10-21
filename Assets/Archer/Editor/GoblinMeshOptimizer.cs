@@ -49,6 +49,11 @@ namespace Archer.EditorTools
         [MenuItem("Archer/Optimize Goblin Mesh")]
         public static string Run()
         {
+            // The shipped visual now comes from Assets/Goblin_Character. This
+            // tool only knows the superseded Mixamo rig and would overwrite the
+            // new prefab with the old goblin, so refuse rather than regress it.
+            if (System.IO.File.Exists("Assets/Goblin_Character/Model/Goblin.fbx"))
+                return "SKIPPED: use 'Archer/Rebuild Goblin Model (Goblin_Character)' for the current goblin.";
             var rigPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(RigPrefabPath);
             if (rigPrefab == null)
                 return "ERROR: rig prefab missing. Run 'Archer/Rebuild Goblin Animation Prefab' first.";

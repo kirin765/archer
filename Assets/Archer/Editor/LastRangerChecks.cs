@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using System.Collections;
 using System.IO;
@@ -71,15 +72,14 @@ namespace Archer.EditorTools
         {
             var gm=GameManager.Instance; var archer=gm.Archer;
             gm.Restart(); gm.SpawnInterval=1000f;
-            float baseCharge = archer.ChargeTime, baseRecovery = gm.ArrowRegenInterval;
+            float baseCharge = archer.ChargeTime;
             _mouse=InputSystem.AddDevice<Mouse>("Last Ranger checks");
             MouseEvent(Vector2.zero,false); yield return 0.1f;
             gm.StartRaid();
             Check(gm.RaidNumber==1,"Duplicate raid start rejected");
-            int arrows=gm.Arrows;
             gm.TogglePause();
             Check(gm.State==GameState.Paused && Time.timeScale==0,"Pause freezes simulation");
-            Check(!gm.TryConsumeArrow() && gm.Arrows==arrows,"Cannot shoot while paused");
+            Check(!gm.CanFire,"Cannot shoot while paused");
             gm.TogglePause();
             Check(gm.State==GameState.Playing && Time.timeScale==1,"Resume restores simulation");
             // Real physics: a horizontal arrow must lose height and point downward.
@@ -97,13 +97,15 @@ namespace Archer.EditorTools
             yield return null;
             Transform head=null;
             foreach(var part in _target.GetComponentsInChildren<Transform>())
-                if(part.name=="Head") { head=part; break; }
-            Vector2 point=Camera.main.WorldToScreenPoint((head!=null?head.position:_target.transform.position) + Vector3.up * 0.3f);
+                if(string.Equals(part.name,"Head",System.StringComparison.OrdinalIgnoreCase)) { head=part; break; }
+            Vector2 point=Camera.main.WorldToScreenPoint((head!=null?head.position:_target.transform.position) + Vector3.up * 0.22f);
             MouseEvent(point,true); yield return 0.2f;
             Check(archer.IsAiming,"Fresh pointer press draws bow");
             Check(archer.HasPrediction,"Trajectory predicts an impact");
+            Check(Camera.main.transform.GetComponentsInChildren<Renderer>(true).All(r => !r.enabled), "First-person bow, glove and held arrow stay hidden");
             yield return archer.ChargeTime + 0.1f;
             Check(archer.Charge01>0.99f,"Configured draw reaches full charge");
+            Check(archer.Prediction == AimPrediction.Enemy, "Trajectory identifies an enemy hit at full draw");
             MouseEvent(point,false); yield return 0.65f;
             Check(gm.ShotsFired==1,"Release fires exactly one shot");
             Check(gm.ShotsHit==1 && _target.Health<120,"Real ballistic projectile hits aimed enemy");
@@ -121,6 +123,7 @@ namespace Archer.EditorTools
             Vector3 shield=shieldPart.position;
             point=Camera.main.WorldToScreenPoint(shield + Vector3.up * 1.1f);
             MouseEvent(point,true); yield return archer.ChargeTime + 0.1f;
+            Check(archer.Prediction == AimPrediction.Shield, "Trajectory warns before a shield blocks the shot");
             MouseEvent(point,false); yield return 0.65f;
             Check(_target.Health==120,"Shield blocks a body shot");
             Check(gm.HitStreak==0 && gm.Score==75 && gm.ShotsHit==1,"Shield block breaks streak without awarding points");
@@ -140,10 +143,13 @@ namespace Archer.EditorTools
             MouseEvent(point,true); yield return 0.1f;
             MouseEvent(point,false); yield return 0.1f;
             Check(gm.State==GameState.Playing && !archer.IsAiming,"Canvas resume does not also draw a shot");
-            gm.Arrows=0;
-            yield return gm.ArrowRegenInterval + 0.15f;
-            Check(gm.Arrows>0,"An empty quiver regenerates ammunition");
-            gm.Arrows=gm.MaxArrows;
+            // Repeated shots never exhaust ammunition or wait for recovery.
+            int shotsBefore = gm.ShotsFired;
+            var fire = typeof(ArcherController).GetMethod("Fire", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            for (int i = 0; i < 20; i++) fire.Invoke(archer, null);
+            Check(gm.ShotsFired == shotsBefore + 20 && gm.CanFire, "Twenty consecutive shots fire without an ammunition limit");
+            gm.ClearProjectiles();
+            Check(!Hud.Instance.transform.GetComponentsInChildren<Transform>(true).Any(t => t.name == "Quiver panel" || t.name == "Arrow recovery"), "Quiver and recovery HUD are removed");
 
             // Death while drawing and restart with a live projectile.
             MouseEvent(new Vector2(Screen.width*0.5f,Screen.height*0.5f),true); yield return 0.15f;
@@ -160,7 +166,7 @@ namespace Archer.EditorTools
             Check(UnityEngine.Object.FindObjectsByType<Arrow>(FindObjectsSortMode.None).Length==0,"Restart removes all live projectiles");
             Check(gm.ShotsFired==0 && gm.ShotsHit==0 && gm.Kills==0 && gm.RaidsCleared==0,"Restart resets run statistics");
             Check(gm.Score==0 && gm.Headshots==0 && gm.BestStreak==0,"Restart resets score and precision statistics");
-            Check(gm.Health==gm.MaxHealth && gm.Arrows==gm.MaxArrows,"Restart restores health and quiver");
+            Check(gm.Health==gm.MaxHealth && gm.CanFire,"Restart restores health and permits shooting");
             UnityEngine.Object.Destroy(shaft);
             gm.SpawnInterval=0.015f;
 
@@ -171,6 +177,11 @@ namespace Archer.EditorTools
                 if(raid==8) Check(gm.ObjectiveKind==RaidObjectiveKind.StopRunners && gm.ObjectiveTarget==5,"Raid eight requires stopping every runner");
                 if(raid==9) Check(gm.ObjectiveKind==RaidObjectiveKind.InterruptBrute && gm.ObjectiveTarget==1,"Raid nine rehearses the brute interrupt");
                 if(raid==10) Check(gm.ObjectiveKind==RaidObjectiveKind.InterruptBrute && gm.ObjectiveTarget==2,"Raid ten combines the brute interrupt finale");
+                if(raid==11) Check(gm.ObjectiveKind==RaidObjectiveKind.StopRunners && gm.ObjectiveTarget==4,"Chapter three opens with a runner sweep");
+                if(raid==12) Check(gm.ObjectiveKind==RaidObjectiveKind.InterruptBrute && gm.ObjectiveTarget==1,"Raid twelve introduces the chapter three brute");
+                if(raid==13) Check(gm.ObjectiveKind==RaidObjectiveKind.StopRunners && gm.ObjectiveTarget==5,"Raid thirteen requires stopping every runner");
+                if(raid==14) Check(gm.ObjectiveKind==RaidObjectiveKind.InterruptBrute && gm.ObjectiveTarget==2,"Raid fourteen breaks both war-band brutes");
+                if(raid==15) Check(gm.ObjectiveKind==RaidObjectiveKind.InterruptBrute && gm.ObjectiveTarget==2,"Raid fifteen closes on the brute interrupt finale");
                 // Kill each actually spawned enemy; queue counts must prevent an early clear.
                 double deadline=EditorApplication.timeSinceStartup+8;
                 while(gm.State==GameState.Playing && EditorApplication.timeSinceStartup<deadline)
@@ -179,15 +190,15 @@ namespace Archer.EditorTools
                     yield return 0.04f;
                 }
                 Check(gm.RaidsCleared==raid,"Raid "+raid+" clears exactly once after every queued enemy");
-                if(raid==2 || raid==8) Check(gm.ObjectiveComplete && gm.ObjectivesCompleted>0,"Stopping every runner completes the raid objective");
-                if(raid==5 || raid==9 || raid==10) Check(gm.ObjectiveFailed,"Killing the brute without enough interrupts fails the optional objective");
+                if(raid==2 || raid==8 || raid==11 || raid==13) Check(gm.ObjectiveComplete && gm.ObjectivesCompleted>0,"Stopping every runner completes the raid objective");
+                if(raid==5 || raid==9 || raid==10 || raid==12 || raid==14 || raid==15) Check(gm.ObjectiveFailed,"Killing the brute without enough interrupts fails the optional objective");
                 if(raid<GameManager.TotalRaids)
                 {
                     Check(gm.State==GameState.Intermission && gm.Offers.Count==2,"Cleared raid offers two supplies");
                     int number=gm.RaidNumber;
                     gm.StartRaid(); Check(gm.RaidNumber==number,"Unchosen supplies cannot be skipped");
                     var chosen=gm.Offers[0];
-                    float beforeCharge=archer.ChargeTime, beforeRecovery=gm.ArrowRegenInterval;
+                    float beforeCharge=archer.ChargeTime;
                     if(raid==1)
                     {
                         double overlayDeadline=EditorApplication.timeSinceStartup+4;
@@ -201,22 +212,21 @@ namespace Archer.EditorTools
                     else gm.ChooseUpgrade(chosen);
                     Check(gm.Offers.Count==0,"One supply choice consumes both offers");
                     if(chosen==UpgradeKind.QuickDraw) Check(archer.ChargeTime<beforeCharge,"Quickdraw supply reduces draw duration when selected");
-                    if(chosen==UpgradeKind.Recovery) Check(gm.ArrowRegenInterval<beforeRecovery,"Recovery supply reduces recovery interval when selected");
-                    float afterDamage=archer.ArrowDamage, afterHealth=gm.MaxHealth; int afterCapacity=gm.MaxArrows;
+                    float afterDamage=archer.ArrowDamage, afterHealth=gm.MaxHealth, afterCharge=archer.ChargeTime;
                     gm.ChooseUpgrade(chosen);
-                    Check(archer.ArrowDamage==afterDamage && gm.MaxHealth==afterHealth && gm.MaxArrows==afterCapacity,"Supply cannot be taken twice");
+                    Check(archer.ArrowDamage==afterDamage && gm.MaxHealth==afterHealth && archer.ChargeTime==afterCharge,"Supply cannot be taken twice");
                     gm.StartRaid();
                 }
             }
             Check(gm.Score>0,"Completing raids awards score");
-            Check(gm.State==GameState.Victory && gm.RaidNumber==GameManager.TotalRaids,"Tenth raid ends in Chapter Two cleared");
-            gm.StartRaid(); Check(gm.RaidNumber==GameManager.TotalRaids,"Victory cannot start an unintended eleventh raid");
+            Check(gm.State==GameState.Victory && gm.RaidNumber==GameManager.TotalRaids,"Fifteenth raid ends in Chapter Three cleared");
+            gm.StartRaid(); Check(gm.RaidNumber==GameManager.TotalRaids,"Victory cannot start an unintended sixteenth raid");
             int kills=gm.Kills;
-            Check(!gm.TryConsumeArrow(),"Victory rejects shooting");
+            Check(!gm.CanFire,"Victory rejects shooting");
             gm.Restart(); yield return 0.1f;
             Check(gm.RaidNumber==1 && gm.RaidsCleared==0,"Restart from victory begins a clean run");
-            Check(archer.ChargeTime==baseCharge && gm.ArrowRegenInterval==baseRecovery,"Restart restores draw and recovery rates");
-            Check(archer.ArrowDamage==34 && gm.MaxHealth==100 && gm.MaxArrows==6,"Restart restores baseline upgrades");
+            Check(archer.ChargeTime==baseCharge,"Restart restores draw duration");
+            Check(archer.ArrowDamage==34 && gm.MaxHealth==100,"Restart restores baseline upgrades");
         }
 
         static void Finish(string status)

@@ -25,8 +25,8 @@ namespace Archer
         public float SpawnFarZ = 30f;
 
         [Header("Bow")]
-        public float MinLaunchSpeed = 16f;
-        public float MaxLaunchSpeed = 30f;
+        public float MinLaunchSpeed = 17.6f;
+        public float MaxLaunchSpeed = 33f;
         public float MinPitch = -20f;
         public float MaxPitch = 52f;
         public float MaxYaw = 34f;
@@ -34,7 +34,6 @@ namespace Archer
 
         [Header("Archer")]
         public float ArcherHealth = 100f;
-        public int MaxArrows = 6;
 
         [Header("Time")]
         public float StartTimeOfDay = 0.65f;
@@ -217,8 +216,6 @@ namespace Archer
             var gm = managerGo.AddComponent<GameManager>();
             gm.MaxHealth = ArcherHealth;
             gm.Health = ArcherHealth;
-            gm.MaxArrows = MaxArrows;
-            gm.Arrows = MaxArrows;
             gm.MonsterParent = _monsterParent;
             gm.ArcherTarget = _archerRoot.transform;
             gm.SpawnHalfWidth = SpawnHalfWidth;

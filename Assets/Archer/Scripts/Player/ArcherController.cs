@@ -2,12 +2,14 @@ using UnityEngine;
 
 namespace Archer
 {
+    public enum AimPrediction { None, Environment, Enemy, Shield }
+
     /// <summary>
     /// The player. Control contract:
     /// tap to aim (sets the initial yaw/pitch toward the tapped point),
     /// hold to charge power over <see cref="ChargeTime"/>, drag to adjust the
     /// shot angle (horizontal = yaw, vertical = pitch), and release to fire.
-    /// Aiming is only permitted during active play with ammunition available.
+    /// Aiming is only permitted during active play.
     /// </summary>
     public class ArcherController : MonoBehaviour
     {
@@ -17,11 +19,11 @@ namespace Archer
         public float MaxPitch = 52f;
 
         [Header("Draw / power")]
-        public float MinLaunchSpeed = 16f;
-        public float MaxLaunchSpeed = 30f;
+        public float MinLaunchSpeed = 17.6f;
+        public float MaxLaunchSpeed = 33f;
         public float MinPower = 0.28f;
         [Tooltip("Seconds of holding to charge from minimum power to full power.")]
-        public float ChargeTime = 1.5f;
+        public float ChargeTime = 1f;
         [Tooltip("Fraction of the smaller screen dimension treated as a full aim drag.")]
         public float FullDrawScreenFraction = 0.34f;
         [Tooltip("Multiplier on up/down drag -> shot angle response. Below 1 = less sensitive.")]
@@ -73,6 +75,7 @@ namespace Archer
         Vector2 _aimScreen;
         public Vector3 PredictedImpact { get; private set; }
         public bool HasPrediction { get; private set; }
+        public AimPrediction Prediction { get; private set; }
         public Vector2 ReticlePosition => _camera != null && HasPrediction
             ? (Vector2)_camera.WorldToScreenPoint(PredictedImpact) : _aimScreen;
         public Vector3 LaunchPosition => _nock.position + AimDirection * 0.3f;
@@ -126,6 +129,11 @@ namespace Archer
             _bowRoll.localRotation = Quaternion.Euler(0f, 0f, BowRoll);
 
             BuildBow();
+            // Keep the launch transforms and draw animation, but hide the whole
+            // first-person model (bow, glove, string and nocked arrow) so it
+            // cannot obscure enemies. The trajectory is built separately below.
+            foreach (var renderer in _bowRoll.GetComponentsInChildren<Renderer>(true))
+                renderer.enabled = false;
             BuildTrajectory();
             ResetPose();
         }
@@ -204,14 +212,12 @@ namespace Archer
             // Practice always shows the trajectory guide: it is the teaching aid
             // for gravity. Players can still turn it off for the raids themselves.
             if (gm != null && gm.State == GameState.Tutorial) ShowAimGuide = true;
-            // Aiming requires active play AND ammunition, so we never show a
-            // draw/release that cannot launch an arrow.
+            // Only active play permits drawing and releasing a shot.
             if (UnityEngine.InputSystem.Keyboard.current != null && UnityEngine.InputSystem.Keyboard.current.escapeKey.wasPressedThisFrame)
             {
                 if (_aiming) CancelAim(); else gm?.TogglePause();
             }
-            bool canAim = gm != null && (gm.State == GameState.Playing || gm.State == GameState.Tutorial)
-                && (gm.State == GameState.Tutorial || gm.Arrows > 0);
+            bool canAim = gm != null && gm.CanFire;
 
             // A finger already down when play (re)starts is the UI press that
             // started the raid, not a draw; require a fresh press first.
@@ -221,7 +227,7 @@ namespace Archer
             if (_suppressUntilRelease && !InputService.Held)
                 _suppressUntilRelease = false;
 
-            // Single cancellation path: game over, pause, no ammo, restart, etc.
+            // Single cancellation path: game over, pause, restart, etc.
             if (_aiming && !canAim)
             {
                 CancelAim();
@@ -253,6 +259,7 @@ namespace Archer
             _aiming = false;
             _suppressUntilRelease = true;
             HasPrediction = false;
+            Prediction = AimPrediction.None;
             _power = MinPower;
             if (_nockedArrow != null) _nockedArrow.gameObject.SetActive(false);
             if (_trajectory != null) _trajectory.positionCount = 0;
@@ -452,15 +459,17 @@ namespace Archer
             _trajectory.positionCount = show ? maxPoints : 0;
             Vector3 previous = p0;
             HasPrediction = false;
+            Prediction = AimPrediction.None;
             for (int i = 0; i < maxPoints; i++)
             {
                 float t = i * dt;
                 Vector3 p = p0 + v0 * t + 0.5f * Physics.gravity * t * t;
-                if (i > 0 && Physics.Linecast(previous, p, out var hit))
+                if (i > 0 && TryPredictImpact(previous, p, out var hit))
                 {
                     p = hit.point;
                     PredictedImpact = p;
                     HasPrediction = true;
+                    Prediction = ClassifyPrediction(hit.collider);
                     if (show) { _trajectory.SetPosition(i, p); _trajectory.positionCount = i + 1; }
                     break;
                 }
@@ -472,10 +481,35 @@ namespace Archer
             }
         }
 
+        bool TryPredictImpact(Vector3 from, Vector3 to, out RaycastHit nearestHit)
+        {
+            Vector3 segment = to - from;
+            int count = Physics.RaycastNonAlloc(from, segment.normalized, _aimHits, segment.magnitude,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            nearestHit = default;
+            float nearest = float.PositiveInfinity;
+            for (int i = 0; i < count; i++)
+            {
+                var hit = _aimHits[i];
+                if (hit.collider.GetComponentInParent<Arrow>() != null || hit.distance >= nearest) continue;
+                nearest = hit.distance;
+                nearestHit = hit;
+            }
+            return nearest < float.PositiveInfinity;
+        }
+
+        public static AimPrediction ClassifyPrediction(Collider collider)
+        {
+            if (collider == null) return AimPrediction.None;
+            var monster = collider.GetComponentInParent<Monster>();
+            if (monster == null || monster.IsDead) return AimPrediction.Environment;
+            return collider.name == "Shield" ? AimPrediction.Shield : AimPrediction.Enemy;
+        }
+
         void Fire()
         {
             var gm = GameManager.Instance;
-            if (gm == null || !gm.TryConsumeArrow()) return;
+            if (gm == null || !gm.CanFire) return;
 
             gm.RegisterShot();
             Vector3 dir = AimDirection;

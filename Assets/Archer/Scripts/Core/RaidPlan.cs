@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace Archer
 {
@@ -43,6 +44,11 @@ namespace Archer
                 case 8: BuildTheHunt(into); break;
                 case 9: BuildBrutesGuard(into); break;
                 case 10: BuildTheWarden(into); break;
+                case 11: BuildFirstFrost(into); break;
+                case 12: BuildIronAndAsh(into); break;
+                case 13: BuildNightSiege(into); break;
+                case 14: BuildWarBand(into); break;
+                case 15: BuildLastDawn(into); break;
                 default: BuildEndless(raid, into); break;
             }
         }
@@ -105,87 +111,191 @@ namespace Archer
             Add(into, MonsterRole.Raider, 0.0f, 28f, 1.0f);
         }
 
-        // 6 · THE SECOND WAVE — chapter two opens with a wider, faster push.
+        // 6 · THE SECOND WAVE — chapter two opens with a wider, mixed push. The
+        // cadence starts close to the brute raid and only then tightens, so the
+        // chapter boundary is a step rather than a wall.
         static void BuildSecondWave(List<SpawnOrder> into)
         {
-            Add(into, MonsterRole.Raider, -0.45f, 27f, 0.5f);
-            Add(into, MonsterRole.Runner, 0.55f, 35f, 0.8f);
-            Add(into, MonsterRole.Raider, 0.20f, 26f, 0.6f);
-            Add(into, MonsterRole.Shield, -0.70f, 24f, 0.8f);
-            Add(into, MonsterRole.Runner, -0.20f, 36f, 0.7f);
-            Add(into, MonsterRole.Raider, 0.65f, 30f, 0.6f);
-            Add(into, MonsterRole.Raider, 0.0f, 28f, 0.7f);
-            Add(into, MonsterRole.Runner, 0.35f, 34f, 0.7f);
-            Add(into, MonsterRole.Shield, 0.70f, 25f, 0.9f);
+            Add(into, MonsterRole.Raider, -0.45f, 27f, 0.70f);
+            Add(into, MonsterRole.Runner, 0.55f, 35f, 1.10f);
+            Add(into, MonsterRole.Raider, 0.20f, 26f, 0.85f);
+            Add(into, MonsterRole.Shield, -0.70f, 24f, 1.10f);
+            Add(into, MonsterRole.Runner, -0.20f, 36f, 0.95f);
+            Add(into, MonsterRole.Raider, 0.65f, 30f, 0.85f);
+            Add(into, MonsterRole.Runner, 0.35f, 34f, 0.95f);
+            Add(into, MonsterRole.Shield, 0.70f, 25f, 1.20f);
         }
 
-        // 7 · IRON RANKS — a shield wall with runners using the gaps.
+        // 7 · IRON RANKS — a shield wall with runners using the gaps. One enemy
+        // more than raid six, and a slightly tighter drip between them.
         static void BuildIronRanks(List<SpawnOrder> into)
         {
-            Add(into, MonsterRole.Shield, -0.6f, 24f, 0.45f);
-            Add(into, MonsterRole.Shield, 0.0f, 26f, 0.55f);
-            Add(into, MonsterRole.Shield, 0.6f, 24f, 0.45f);
-            Add(into, MonsterRole.Raider, -0.6f, 31f, 0.7f);
-            Add(into, MonsterRole.Raider, 0.6f, 31f, 0.6f);
-            Add(into, MonsterRole.Runner, -0.55f, 36f, 0.8f);
-            Add(into, MonsterRole.Runner, 0.55f, 36f, 0.7f);
-            Add(into, MonsterRole.Shield, 0.0f, 28f, 0.9f);
-            Add(into, MonsterRole.Raider, 0.0f, 29f, 0.8f);
-            Add(into, MonsterRole.Runner, 0.0f, 37f, 0.9f);
+            Add(into, MonsterRole.Shield, -0.6f, 24f, 0.60f);
+            Add(into, MonsterRole.Shield, 0.0f, 26f, 0.70f);
+            Add(into, MonsterRole.Shield, 0.6f, 24f, 0.60f);
+            Add(into, MonsterRole.Raider, -0.6f, 31f, 0.90f);
+            Add(into, MonsterRole.Raider, 0.6f, 31f, 0.80f);
+            Add(into, MonsterRole.Runner, -0.55f, 36f, 1.05f);
+            Add(into, MonsterRole.Runner, 0.55f, 36f, 0.90f);
+            Add(into, MonsterRole.Raider, 0.0f, 29f, 1.00f);
+            Add(into, MonsterRole.Runner, 0.0f, 37f, 1.15f);
         }
 
-        // 8 · THE HUNT — runners dominate; they must be led before the shields close.
+        // 8 · THE HUNT — runners dominate; they must be led before the shields
+        // close. The wave stays the same size as raid seven, but faster.
         static void BuildTheHunt(List<SpawnOrder> into)
         {
-            Add(into, MonsterRole.Runner, -0.65f, 36f, 0.4f);
-            Add(into, MonsterRole.Runner, 0.65f, 36f, 0.45f);
-            Add(into, MonsterRole.Raider, 0.0f, 28f, 0.55f);
-            Add(into, MonsterRole.Runner, -0.25f, 35f, 0.65f);
-            Add(into, MonsterRole.Shield, 0.45f, 25f, 0.75f);
-            Add(into, MonsterRole.Runner, 0.25f, 37f, 0.55f);
-            Add(into, MonsterRole.Raider, -0.55f, 30f, 0.65f);
-            Add(into, MonsterRole.Shield, -0.45f, 26f, 0.75f);
-            Add(into, MonsterRole.Runner, 0.0f, 36f, 0.55f);
-            Add(into, MonsterRole.Raider, 0.55f, 29f, 0.7f);
+            Add(into, MonsterRole.Runner, -0.65f, 36f, 0.55f);
+            Add(into, MonsterRole.Runner, 0.65f, 36f, 0.60f);
+            Add(into, MonsterRole.Raider, 0.0f, 28f, 0.75f);
+            Add(into, MonsterRole.Runner, -0.25f, 35f, 0.90f);
+            Add(into, MonsterRole.Shield, 0.45f, 25f, 1.00f);
+            Add(into, MonsterRole.Runner, 0.25f, 37f, 0.75f);
+            Add(into, MonsterRole.Raider, -0.55f, 30f, 0.90f);
+            Add(into, MonsterRole.Shield, -0.45f, 26f, 1.00f);
+            Add(into, MonsterRole.Runner, 0.0f, 36f, 0.75f);
         }
 
         // 9 · THE BRUTE'S GUARD — shields arrive first; the brute follows the wall.
         static void BuildBrutesGuard(List<SpawnOrder> into)
         {
-            Add(into, MonsterRole.Shield, -0.55f, 24f, 0.45f);
-            Add(into, MonsterRole.Shield, 0.55f, 24f, 0.45f);
-            Add(into, MonsterRole.Raider, 0.0f, 28f, 0.6f);
-            Add(into, MonsterRole.Shield, 0.0f, 26f, 0.55f);
-            Add(into, MonsterRole.Runner, -0.55f, 35f, 0.7f);
-            Add(into, MonsterRole.Runner, 0.55f, 35f, 0.6f);
-            Add(into, MonsterRole.Raider, -0.3f, 29f, 0.7f);
-            Add(into, MonsterRole.Raider, 0.3f, 31f, 0.6f);
-            Add(into, MonsterRole.Ogre, 0.0f, 34f, 1.0f);
+            Add(into, MonsterRole.Shield, -0.55f, 24f, 0.55f);
+            Add(into, MonsterRole.Shield, 0.55f, 24f, 0.55f);
+            Add(into, MonsterRole.Raider, 0.0f, 28f, 0.70f);
+            Add(into, MonsterRole.Shield, 0.0f, 26f, 0.65f);
+            Add(into, MonsterRole.Runner, -0.55f, 35f, 0.85f);
+            Add(into, MonsterRole.Runner, 0.55f, 35f, 0.70f);
+            Add(into, MonsterRole.Raider, -0.3f, 29f, 0.85f);
+            Add(into, MonsterRole.Raider, 0.3f, 31f, 0.70f);
+            Add(into, MonsterRole.Ogre, 0.0f, 34f, 1.20f);
         }
 
         // 10 · THE WARDEN — the brute leads the last wave; the guard follows.
+        // The finale is the only deliberate spike, and even it eases in.
         static void BuildTheWarden(List<SpawnOrder> into)
         {
-            Add(into, MonsterRole.Ogre, 0.0f, 34f, 0.8f);
-            Add(into, MonsterRole.Shield, -0.65f, 24f, 1.0f);
-            Add(into, MonsterRole.Shield, 0.0f, 25f, 0.4f);
-            Add(into, MonsterRole.Shield, 0.65f, 24f, 0.4f);
-            Add(into, MonsterRole.Runner, -0.65f, 36f, 0.6f);
-            Add(into, MonsterRole.Runner, 0.65f, 36f, 0.5f);
-            Add(into, MonsterRole.Raider, -0.35f, 29f, 0.6f);
-            Add(into, MonsterRole.Raider, 0.35f, 29f, 0.55f);
-            Add(into, MonsterRole.Shield, 0.0f, 27f, 0.7f);
-            Add(into, MonsterRole.Runner, 0.0f, 37f, 0.8f);
-            Add(into, MonsterRole.Raider, 0.0f, 30f, 0.7f);
+            Add(into, MonsterRole.Ogre, 0.0f, 34f, 0.85f);
+            Add(into, MonsterRole.Shield, -0.65f, 24f, 1.05f);
+            Add(into, MonsterRole.Shield, 0.0f, 25f, 0.45f);
+            Add(into, MonsterRole.Shield, 0.65f, 24f, 0.45f);
+            Add(into, MonsterRole.Runner, -0.65f, 36f, 0.65f);
+            Add(into, MonsterRole.Runner, 0.65f, 36f, 0.55f);
+            Add(into, MonsterRole.Raider, -0.35f, 29f, 0.65f);
+            Add(into, MonsterRole.Raider, 0.35f, 29f, 0.60f);
+            Add(into, MonsterRole.Shield, 0.0f, 27f, 0.75f);
+            Add(into, MonsterRole.Runner, 0.0f, 37f, 0.85f);
+            Add(into, MonsterRole.Raider, 0.0f, 30f, 0.75f);
         }
 
-        // Not yet authored — a gently scaling horde so the loop can extend past chapter two.
+        // ── Chapter three · THE DARKEST HOUR ─────────────────────────────────
+        // Every raid adds one more body than the last, while the drip between
+        // spawns keeps tightening by roughly 5% per raid.
+
+        // 11 · THE FIRST FROST — runners probe both flanks while a wide shield
+        // screen walks the centre. No brute yet: the chapter opens on volume.
+        static void BuildFirstFrost(List<SpawnOrder> into)
+        {
+            Add(into, MonsterRole.Raider, -0.6f, 27f, 0.55f);
+            Add(into, MonsterRole.Runner, 0.6f, 36f, 0.75f);
+            Add(into, MonsterRole.Raider, 0.0f, 29f, 0.60f);
+            Add(into, MonsterRole.Shield, -0.5f, 24f, 0.80f);
+            Add(into, MonsterRole.Runner, 0.35f, 35f, 0.55f);
+            Add(into, MonsterRole.Raider, -0.3f, 30f, 0.60f);
+            Add(into, MonsterRole.Shield, 0.5f, 25f, 0.75f);
+            Add(into, MonsterRole.Runner, -0.6f, 36f, 0.55f);
+            Add(into, MonsterRole.Raider, 0.5f, 28f, 0.60f);
+            Add(into, MonsterRole.Shield, 0.0f, 26f, 0.75f);
+            Add(into, MonsterRole.Runner, 0.0f, 37f, 0.55f);
+            Add(into, MonsterRole.Raider, 0.2f, 31f, 0.60f);
+        }
+
+        // 12 · IRON AND ASH — a closed shield wall grinds forward; the first
+        // brute of the chapter steps up behind it and must be interrupted.
+        static void BuildIronAndAsh(List<SpawnOrder> into)
+        {
+            Add(into, MonsterRole.Shield, -0.6f, 24f, 0.55f);
+            Add(into, MonsterRole.Shield, 0.0f, 26f, 0.55f);
+            Add(into, MonsterRole.Shield, 0.6f, 24f, 0.55f);
+            Add(into, MonsterRole.Raider, -0.6f, 30f, 0.65f);
+            Add(into, MonsterRole.Raider, 0.6f, 30f, 0.60f);
+            Add(into, MonsterRole.Ogre, 0.0f, 34f, 0.85f);
+            Add(into, MonsterRole.Runner, -0.6f, 36f, 0.55f);
+            Add(into, MonsterRole.Runner, 0.6f, 36f, 0.55f);
+            Add(into, MonsterRole.Raider, 0.0f, 29f, 0.60f);
+            Add(into, MonsterRole.Shield, -0.3f, 25f, 0.65f);
+            Add(into, MonsterRole.Runner, 0.0f, 37f, 0.60f);
+            Add(into, MonsterRole.Raider, 0.3f, 31f, 0.65f);
+        }
+
+        // 13 · THE NIGHT SIEGE — runners own the edges and shields the centre;
+        // the objective is to stop every runner before it reaches the gate.
+        static void BuildNightSiege(List<SpawnOrder> into)
+        {
+            Add(into, MonsterRole.Runner, -0.7f, 36f, 0.50f);
+            Add(into, MonsterRole.Shield, -0.5f, 24f, 0.65f);
+            Add(into, MonsterRole.Runner, 0.7f, 36f, 0.50f);
+            Add(into, MonsterRole.Shield, 0.5f, 24f, 0.65f);
+            Add(into, MonsterRole.Raider, 0.0f, 28f, 0.60f);
+            Add(into, MonsterRole.Runner, -0.3f, 35f, 0.55f);
+            Add(into, MonsterRole.Shield, 0.0f, 26f, 0.70f);
+            Add(into, MonsterRole.Raider, -0.6f, 30f, 0.60f);
+            Add(into, MonsterRole.Raider, 0.6f, 30f, 0.60f);
+            Add(into, MonsterRole.Runner, 0.3f, 35f, 0.55f);
+            Add(into, MonsterRole.Shield, 0.3f, 25f, 0.70f);
+            Add(into, MonsterRole.Raider, 0.0f, 31f, 0.60f);
+            Add(into, MonsterRole.Runner, 0.0f, 37f, 0.60f);
+        }
+
+        // 14 · THE WAR BAND — two brutes headline the push, screened by shields
+        // while raiders and runners fill the gaps. Both swings must be broken.
+        static void BuildWarBand(List<SpawnOrder> into)
+        {
+            Add(into, MonsterRole.Ogre, -0.4f, 34f, 0.60f);
+            Add(into, MonsterRole.Ogre, 0.4f, 35f, 0.90f);
+            Add(into, MonsterRole.Shield, -0.7f, 24f, 0.55f);
+            Add(into, MonsterRole.Shield, 0.0f, 25f, 0.55f);
+            Add(into, MonsterRole.Shield, 0.7f, 24f, 0.55f);
+            Add(into, MonsterRole.Raider, -0.6f, 29f, 0.45f);
+            Add(into, MonsterRole.Raider, 0.6f, 29f, 0.45f);
+            Add(into, MonsterRole.Runner, -0.4f, 36f, 0.50f);
+            Add(into, MonsterRole.Runner, 0.4f, 36f, 0.50f);
+            Add(into, MonsterRole.Raider, 0.0f, 30f, 0.45f);
+            Add(into, MonsterRole.Shield, -0.35f, 26f, 0.55f);
+            Add(into, MonsterRole.Runner, 0.0f, 37f, 0.55f);
+            Add(into, MonsterRole.Raider, -0.2f, 31f, 0.45f);
+            Add(into, MonsterRole.Raider, 0.2f, 31f, 0.45f);
+        }
+
+        // 15 · THE LAST DAWN — the finale: two brutes, a five-deep shield wall
+        // and runners on both flanks. The tightest drip in the game.
+        static void BuildLastDawn(List<SpawnOrder> into)
+        {
+            Add(into, MonsterRole.Ogre, 0.0f, 34f, 0.55f);
+            Add(into, MonsterRole.Shield, -0.65f, 24f, 0.50f);
+            Add(into, MonsterRole.Shield, 0.0f, 25f, 0.50f);
+            Add(into, MonsterRole.Shield, 0.65f, 24f, 0.50f);
+            Add(into, MonsterRole.Runner, -0.65f, 36f, 0.45f);
+            Add(into, MonsterRole.Runner, 0.65f, 36f, 0.45f);
+            Add(into, MonsterRole.Raider, -0.4f, 29f, 0.45f);
+            Add(into, MonsterRole.Raider, 0.4f, 29f, 0.45f);
+            Add(into, MonsterRole.Shield, -0.3f, 26f, 0.55f);
+            Add(into, MonsterRole.Shield, 0.3f, 26f, 0.55f);
+            Add(into, MonsterRole.Ogre, 0.1f, 35f, 0.80f);
+            Add(into, MonsterRole.Runner, -0.25f, 36f, 0.45f);
+            Add(into, MonsterRole.Runner, 0.25f, 36f, 0.45f);
+            Add(into, MonsterRole.Raider, 0.0f, 30f, 0.45f);
+            Add(into, MonsterRole.Raider, -0.55f, 31f, 0.45f);
+            Add(into, MonsterRole.Raider, 0.55f, 31f, 0.45f);
+        }
+
+        // Not yet authored — a gently scaling horde so the loop can extend past
+        // the authored fifteen raids without a sudden leap in wave size.
         static void BuildEndless(int raid, List<SpawnOrder> into)
         {
-            int extra = raid - 6;
-            int raiders = 5 + extra / 4;
-            int runners = 2 + extra / 4;
-            int shields = 2 + extra / 5;
+            int extra = Mathf.Max(0, raid - 15);
+            int raiders = 5 + extra / 3;
+            int runners = 2 + extra / 3;
+            int shields = 2 + extra / 4;
 
             Add(into, MonsterRole.Ogre, 0.0f, 34f, 1.0f);
             for (int i = 0; i < shields; i++)

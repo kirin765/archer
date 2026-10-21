@@ -10,7 +10,7 @@ namespace Archer
     /// </summary>
     public class TimeOfDay : MonoBehaviour
     {
-        [Tooltip("Fraction of a full day added each new raid across the ten-raid, two-chapter defense.")]
+        [Tooltip("Fraction of a full day added each new raid across the fifteen-raid, three-chapter defense.")]
         public float AdvancePerRaid = 0.007f;
         [Tooltip("Fraction of a full day that passes per second of active play.")]
         public float DriftPerSecond = 0.00015f;

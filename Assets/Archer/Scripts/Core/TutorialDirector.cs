@@ -63,6 +63,15 @@ namespace Archer
             SpawnStillTarget();
         }
 
+        /// <summary>Abandon a lesson in progress (leaving the run for the title).</summary>
+        public void Cancel()
+        {
+            ClearTarget();
+            HitsThisStep = 0;
+            _doneDelay = -1f;
+            Current = Step.Done;
+        }
+
         void OnMonsterHit(Monster monster, bool headshot)
         {
             if (_gm == null || _gm.State != GameState.Tutorial || monster != _target || _target == null) return;
