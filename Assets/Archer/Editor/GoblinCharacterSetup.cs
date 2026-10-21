@@ -118,7 +118,8 @@ namespace Archer.EditorTools
                 Debug.LogWarning("[GoblinCharacterSetup] Sword prefab missing: " + SourceSword);
                 return;
             }
-            var hand = FindBone(model.transform, "DEF-hand.R")
+            var hand = FindBone(model.transform, "DEF-palm.02.R")
+                ?? FindBone(model.transform, "DEF-hand.R")
                 ?? FindBone(model.transform, "hand.R")
                 ?? FindBone(model.transform, "R_Hand");
             if (hand == null)
@@ -129,8 +130,10 @@ namespace Archer.EditorTools
 
             var sword = Object.Instantiate(source, hand);
             sword.name = "Sword";
+            // Grip copied from the author's demo scene (Goblin- Scene.unity),
+            // where the sword is a child of DEF-palm.02.R with this rotation.
             sword.transform.localPosition = Vector3.zero;
-            sword.transform.localRotation = Quaternion.identity;
+            sword.transform.localRotation = new Quaternion(-0.58756f, 0.72742f, -0.24889f, -0.25237f);
             sword.transform.localScale = Vector3.one;
             foreach (var renderer in sword.GetComponentsInChildren<Renderer>(true))
             {
